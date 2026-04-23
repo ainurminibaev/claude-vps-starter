@@ -1,0 +1,6 @@
+.env
+*.log
+whisper-asr/cache/
+whisper-asr/models/
+__pycache__/
+.DS_Store
