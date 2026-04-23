@@ -1,0 +1,14 @@
+services:
+  whisper-asr:
+    image: onerahmet/openai-whisper-asr-webservice:latest
+    container_name: whisper-asr
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9000:9000"
+    environment:
+      ASR_ENGINE: faster_whisper
+      ASR_MODEL: base
+      ASR_MODEL_PATH: /data/models
+    volumes:
+      - ./cache:/root/.cache
+      - ./models:/data/models

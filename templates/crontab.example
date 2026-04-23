@@ -1,0 +1,12 @@
+# Claude Code + Telegram watchdog
+# Установка: crontab -e, вставить эти строки.
+# Watchdog проверяет tmux-сессии раз в минуту и поднимает их при необходимости.
+
+* * * * * /root/claude-tg-watchdog.sh
+@reboot sleep 10 && /root/claude-tg-watchdog.sh
+
+# Опционально: чистка старых .oga от Telegram (старше 7 дней)
+# 0 4 * * * find /root/.claude/channels/telegram/inbox -name '*.oga' -mtime +7 -delete
+
+# Опционально: ротация логов watchdog (если не настроен logrotate)
+# 0 3 * * 0 tail -n 1000 /var/log/claude-tg-watchdog.log > /var/log/claude-tg-watchdog.log.tmp && mv /var/log/claude-tg-watchdog.log.tmp /var/log/claude-tg-watchdog.log
