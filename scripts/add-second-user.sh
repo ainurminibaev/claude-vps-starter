@@ -57,10 +57,11 @@ echo
 if grep -qF "$SESSION_NAME|$USER|$HOME_DIR" "$WATCHDOG"; then
   echo "[ok] $SESSION_NAME уже в watchdog SESSIONS"
 else
-  echo "[>] добавляю $SESSION_NAME в $WATCHDOG"
+  SESSION_UUID=$(uuidgen)
+  echo "[>] добавляю $SESSION_NAME в $WATCHDOG (session-id: $SESSION_UUID)"
   # вставляем новую строку перед закрывающей скобкой массива SESSIONS=( ... )
   sed -i "/^SESSIONS=(/,/^)/ { /^)/ i\\
-  \"$SESSION_NAME|$USER|$HOME_DIR\"
+  \"$SESSION_NAME|$USER|$HOME_DIR|$SESSION_UUID\"
   }" "$WATCHDOG"
   echo "[+] Сессия добавлена. Проверь:"
   grep -A 10 "^SESSIONS=(" "$WATCHDOG" | head -15
