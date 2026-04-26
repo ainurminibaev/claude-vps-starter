@@ -1,18 +1,24 @@
 #!/bin/bash
-# Watchdog for Claude Code + Telegram tmux sessions on Ainur VPS.
-# Runs every minute via cron. Handles multiple sessions (root + wife + ...).
+# Watchdog for Claude Code + Telegram tmux sessions.
+# Runs every minute via cron. Handles multiple sessions (root + extra users).
 # If Claude hits a stuck dialog, dismiss it. If session died or bun died, restart.
 
 LOG="/var/log/claude-tg-watchdog.log"
 
-# Sessions: "tmux_session_name|linux_user|claude_cwd"
+# Sessions: "tmux_session_name|linux_user|claude_cwd|claude_session_id"
+#
+# claude_session_id pins the watchdog to a specific Claude session UUID so
+# restarts always resume the same conversation, even if you start ad-hoc
+# sessions in the same cwd. Generate one with `uuidgen` and keep it stable.
+# (If you prefer the old "always resume last" behavior, replace
+#  `--session-id $SESSION_ID` below with `-c` and drop the 4th field.)
 SESSIONS=(
-  "claude-tg|root|/root"
-  "claude-tg-wife|wife|/home/wife"
+  "claude-tg|root|/root|REPLACE-WITH-UUID-FOR-ROOT"
+  # "claude-tg-extra|extra|/home/extra|REPLACE-WITH-UUID-FOR-EXTRA"
 )
 
 for entry in "${SESSIONS[@]}"; do
-  IFS='|' read -r SESSION USER CWD <<< "$entry"
+  IFS='|' read -r SESSION USER CWD SESSION_ID <<< "$entry"
 
   # tmux runs per-user; wrap tmux commands with sudo -u when not root
   if [[ "$USER" == "root" ]]; then
@@ -28,9 +34,9 @@ for entry in "${SESSIONS[@]}"; do
     echo "$(date -Iseconds) [$SESSION] session missing, starting" >> "$LOG"
     if [[ "$USER" == "root" ]]; then
       tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-        "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude -c --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+        "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude --session-id $SESSION_ID --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
     else
-      sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude -c --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log'"
+      sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude --session-id $SESSION_ID --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log'"
     fi
     sleep 4
     $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
@@ -52,9 +58,9 @@ for entry in "${SESSIONS[@]}"; do
       sleep 2
       if [[ "$USER" == "root" ]]; then
         tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-          "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude -c --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+          "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude --session-id $SESSION_ID --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
       else
-        sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude -c --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
+        sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude --session-id $SESSION_ID --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
       fi
       sleep 4
       $TMUX_CMD send-keys -t "$SESSION" "1" Enter
@@ -84,7 +90,7 @@ for entry in "${SESSIONS[@]}"; do
     continue
   fi
 
-  # Pattern 5: "Resume from summary" prompt after session restart with -c
+  # Pattern 5: "Resume from summary" prompt after session restart
   # Summary mode is cheaper than full session resume for large .jsonl files.
   if echo "$pane" | grep -qE "Resume from summary|Resume full session as-is"; then
     $TMUX_CMD send-keys -t "$SESSION" "1" Enter
@@ -103,9 +109,9 @@ for entry in "${SESSIONS[@]}"; do
       sleep 2
       if [[ "$USER" == "root" ]]; then
         tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-          "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude -c --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+          "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude --session-id $SESSION_ID --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
       else
-        sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude -c --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log'"
+        sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude --session-id $SESSION_ID --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log'"
       fi
       sleep 4
       $TMUX_CMD send-keys -t "$SESSION" "1" Enter

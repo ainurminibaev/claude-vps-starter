@@ -5,7 +5,7 @@ Claude Code в tmux иногда застревает. Причины:
 - Rate-limit dialog («You hit your limit…»).
 - Workspace trust prompt после перезапуска.
 - Auto-mode enable prompt.
-- Resume-from-summary prompt после `claude -c`.
+- Resume-from-summary prompt при ресюме сессии.
 - Упал Bun-процесс MCP-сервера plugin:telegram.
 - Упала сама tmux-сессия.
 
@@ -76,7 +76,7 @@ tail -f /var/log/claude-tg-watchdog.log
 ```
 2026-04-23T08:15:04+00:00 [claude-tg] dismissed rate-limit dialog (1/5)
 2026-04-23T08:20:02+00:00 [claude-tg] confirmed workspace trust
-2026-04-23T09:03:05+00:00 [claude-tg-wife] bun MCP recovered within 30s, no action
+2026-04-23T09:03:05+00:00 [claude-tg-extra] bun MCP recovered within 30s, no action
 ```
 
 Если видишь одно и то же бесконечно — повод зайти `tmux attach -t claude-tg` и посмотреть, что там реально.
@@ -87,12 +87,16 @@ tail -f /var/log/claude-tg-watchdog.log
 
 ```bash
 SESSIONS=(
-  "claude-tg|root|/root"
-  "claude-tg-wife|wife|/home/wife"
+  "claude-tg|root|/root|aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+  "claude-tg-extra|extra|/home/extra|11111111-2222-3333-4444-555555555555"
 )
 ```
 
-Формат: `tmux_session_name|linux_user|claude_cwd`. Добавь строку — watchdog подхватит.
+Формат: `tmux_session_name|linux_user|claude_cwd|claude_session_id`. Добавь строку — watchdog подхватит.
+
+`claude_session_id` — стабильный UUID, к которому ватчдог пинит сессию. При рестарте поднимается тот же диалог через `claude --session-id <UUID>`. Сгенерь один раз через `uuidgen` и не меняй. Скрипт `add-second-user.sh` делает это автоматически.
+
+Если хочешь старое поведение «всегда ресюмить последнюю сессию в этой папке» — замени в скрипте `--session-id $SESSION_ID` на `-c` и убери 4-й столбец из SESSIONS.
 
 Больше деталей — [05-multi-user.md](05-multi-user.md).
 
@@ -100,8 +104,8 @@ SESSIONS=(
 
 - **Cron работает от root.** Для запуска tmux под другого юзера — `sudo -u <user> tmux ...`. Root должен иметь возможность sudo без пароля (обычно и так так).
 - **PATH в tmux new-session.** В строке запуска явно прописан `export PATH=/root/.bun/bin:$PATH`, иначе Claude Code не найдёт `bun` и MCP не поднимется.
-- **Флаги Claude Code.** В скрипте: `--permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official`. `--debug` пишет отладку в `/var/log/claude-tg-debug.log` — удобно для разбора инцидентов.
-- **`claude -c`** — ресюмится с последнего стейта сессии. Если сессия большая, резюме из summary дешевле полного ресюме — поэтому pattern 5 жмёт «1».
+- **Флаги Claude Code.** В скрипте: `--session-id $SESSION_ID --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official`. `--debug` пишет отладку в `/var/log/claude-tg-debug.log` — удобно для разбора инцидентов.
+- **`--session-id <UUID>`** — пинит ватчдог к конкретному UUID, чтобы рестарты всегда поднимали один и тот же диалог. Если сессия большая, резюме из summary дешевле полного ресюме — поэтому pattern 5 жмёт «1».
 
 ## 8. Когда watchdog не спасёт
 
