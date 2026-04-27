@@ -43,9 +43,9 @@ restart_session() {
   echo "$NEW_UUID" > "$STATE_DIR/$SESSION-current-uuid"
   if [[ "$USER" == "root" ]]; then
     tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-      "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude --session-id $NEW_UUID --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+      "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude -c --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
   else
-    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude --session-id $NEW_UUID --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
+    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude -c --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
   fi
   sleep 4
   $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
