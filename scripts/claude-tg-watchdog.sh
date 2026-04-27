@@ -30,22 +30,37 @@ restart_session() {
   local SESSION="$1" USER="$2" CWD="$3"
   local TMUX_CMD="$4"
   $TMUX_CMD kill-session -t "$SESSION" 2>/dev/null
-  # Hard-kill any leftover claude process for this user — it holds the
-  # session-id lock; without this, --session-id $UUID fails with
-  # "Session ID is already in use" and tmux dies immediately.
-  pkill -9 -u "$USER" -f "claude --session-id\|claude -c \|claude --channels" 2>/dev/null
+  pkill -9 -u "$USER" -f "claude --session-id\|claude --resume\|claude -c \|claude --channels" 2>/dev/null
   pkill -9 -u "$USER" -f "bun.*server\.ts" 2>/dev/null
   sleep 3
-  # Generate fresh UUID — Claude Code marks recent jsonl as "in use" by mtime,
-  # reusing the old UUID right after kill triggers "Session ID is already in use".
-  local NEW_UUID
-  NEW_UUID=$(uuidgen)
-  echo "$NEW_UUID" > "$STATE_DIR/$SESSION-current-uuid"
+
+  # Resume the same UUID across restarts to keep conversation context.
+  # If we have no stored UUID yet (first run) OR jsonl missing, bootstrap a new
+  # session via --session-id <new-uuid>; otherwise reuse it via --resume.
+  local UUID_FILE="$STATE_DIR/$SESSION-current-uuid"
+  local SESSION_ID
+  SESSION_ID=$(cat "$UUID_FILE" 2>/dev/null)
+  local PROJECT_KEY
+  PROJECT_KEY=$(echo "$CWD" | sed 's|/|-|g')
+  local JSONL="$CWD/.claude/projects/$PROJECT_KEY/$SESSION_ID.jsonl"
+  if [[ "$USER" == "root" ]]; then
+    JSONL="/root/.claude/projects/-root/$SESSION_ID.jsonl"
+  fi
+  local FLAG
+  if [[ -n "$SESSION_ID" ]] && [[ -f "$JSONL" ]]; then
+    FLAG="--resume $SESSION_ID"
+  else
+    SESSION_ID=$(uuidgen)
+    echo "$SESSION_ID" > "$UUID_FILE"
+    FLAG="--session-id $SESSION_ID"
+    echo "$(date -Iseconds) [$SESSION] bootstrap new session $SESSION_ID" >> "$LOG"
+  fi
+
   if [[ "$USER" == "root" ]]; then
     tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-      "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude -c --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+      "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude $FLAG --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
   else
-    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude -c --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
+    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude $FLAG --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
   fi
   sleep 4
   $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
