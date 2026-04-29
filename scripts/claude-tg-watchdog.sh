@@ -9,6 +9,8 @@
 #   5. "Resume from summary" prompt            → "1" Enter
 #   6. silent hang (pending msg + idle, no spinner, pane unchanged 3m)
 #                                              → tier1 nudge; tier2 restart+nudge
+#   7. bun stuck (process alive but mcp-log mtime stale >5min + pending)
+#                                              → kill bun; Pattern 4 next cycle restarts
 
 LOG="/var/log/claude-tg-watchdog.log"
 STATE_DIR="/var/run/claude-tg-wd"
@@ -145,6 +147,31 @@ for entry in "${SESSIONS[@]}"; do
       echo "$(date -Iseconds) [$SESSION] post-restart nudge sent" >> "$LOG"
     fi
     continue
+  fi
+
+  # Pattern 7: bun stuck — process alive but mcp-log file mtime stale.
+  # bun normally writes to /…/.cache/claude-cli-nodejs/-<key>/mcp-logs-plugin-telegram-telegram/*.jsonl
+  # on every Telegram getUpdates poll (~few-sec cadence). If mtime > 5min stale
+  # AND there's a pending unanswered message in pane → bun's polling loop is
+  # frozen but pgrep still sees the process. Kill it; Pattern 4 next iteration
+  # will detect "bun gone 30s" and restart the session.
+  MCP_LOG_DIR="$CWD/.cache/claude-cli-nodejs/-$(echo "$CWD" | sed 's|^/||;s|/|-|g')/mcp-logs-plugin-telegram-telegram"
+  latest_mcp_log=$(ls -t "$MCP_LOG_DIR"/*.jsonl 2>/dev/null | head -1)
+  if [[ -n "$latest_mcp_log" ]]; then
+    log_age=$(( $(date +%s) - $(stat -c %Y "$latest_mcp_log") ))
+    last_inbound_line=$(echo "$pane" | grep -n "← telegram" | tail -1 | cut -d: -f1)
+    last_activity_line=$(echo "$pane" | grep -nE "● |Called plugin:telegram:telegram" | tail -1 | cut -d: -f1)
+    pending_p7=false
+    if [[ -n "$last_inbound_line" ]]; then
+      if [[ -z "$last_activity_line" ]] || [[ "$last_inbound_line" -gt "$last_activity_line" ]]; then
+        pending_p7=true
+      fi
+    fi
+    if [[ "$log_age" -gt 300 ]] && $pending_p7; then
+      echo "$(date -Iseconds) [$SESSION] bun stuck (mcp-log ${log_age}s stale + pending), killing bun" >> "$LOG"
+      pkill -9 -u "$USER" -f "bun.*server\.ts" 2>/dev/null
+      continue
+    fi
   fi
 
   # Pattern 6: silent hang — pending message + no spinner + pane unchanged 3 min
