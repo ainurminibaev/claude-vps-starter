@@ -9,7 +9,7 @@
 #   5. "Resume from summary" prompt            → "1" Enter
 #   6. silent hang (pending msg + idle, no spinner, pane unchanged 3m)
 #                                              → tier1 nudge; tier2 restart+nudge
-#   7. bun stuck (process alive but mcp-log mtime stale >5min + pending)
+#   7. bun frozen (heartbeat file mtime stale >60s, process alive)
 #                                              → kill bun; Pattern 4 next cycle restarts
 
 LOG="/var/log/claude-tg-watchdog.log"
@@ -21,6 +21,8 @@ mkdir -p "$STATE_DIR"
 SESSIONS=(
   "claude-tg|root|/root"
   "claude-tg-wife|wife|/home/wife"
+  "claude-tg-rafka|rafka|/home/rafka"
+  "claude-tg-bulatov|bulatov|/home/bulatov"
 )
 
 # regex of indicators meaning Claude is currently in a turn (don't touch)
@@ -75,6 +77,49 @@ send_nudge() {
   $TMUX_CMD send-keys -t "$SESSION" "$NUDGE_TEXT" 2>/dev/null
   sleep 1
   $TMUX_CMD send-keys -t "$SESSION" Enter 2>/dev/null
+}
+
+# Snapshot state before triggering restart so we can debug what killed bun.
+# Writes to a per-session diag log dir, capped to ~last 30 entries.
+DIAG_DIR="/var/log/claude-tg-diag"
+mkdir -p "$DIAG_DIR"
+log_diag() {
+  local SESSION="$1" USER="$2" CWD="$3" TMUX_CMD="$4" REASON="$5"
+  local TS
+  TS=$(date -Iseconds)
+  local DIAG_FILE="$DIAG_DIR/$SESSION-$(date +%Y%m%d-%H%M%S).txt"
+  {
+    echo "=== diag $TS [$SESSION] reason=$REASON ==="
+    echo
+    echo "--- claude processes ($USER) ---"
+    ps -u "$USER" -o pid,ppid,etime,stat,cmd 2>/dev/null | grep -E "claude |bun |tmux " | grep -v grep
+    echo
+    echo "--- bun/server.ts pgrep ---"
+    pgrep -u "$USER" -af "bun.*server\.ts" 2>/dev/null
+    echo
+    echo "--- tmux sessions for $USER ---"
+    $TMUX_CMD ls 2>&1
+    echo
+    echo "--- tmux pane (last 60 lines) ---"
+    $TMUX_CMD capture-pane -t "$SESSION" -p -S -60 2>&1
+    echo
+    echo "--- claude-tg-debug.log (last 50 lines) ---"
+    tail -50 /var/log/claude-tg-debug.log 2>/dev/null
+    echo
+    echo "--- session lock files ---"
+    ls -la "$CWD/.claude/projects/" 2>&1 | head -10
+    find "$CWD/.claude" -name "*.lock" -o -name "*.pid" 2>/dev/null | head -20 | while read -r f; do
+      echo "  $f → $(cat "$f" 2>/dev/null | head -1)"
+    done
+    echo
+    echo "--- recent claude jsonl files ---"
+    find "$CWD/.claude/projects" -name "*.jsonl" -mmin -60 2>/dev/null | head -10
+    echo
+    echo "=== end diag ==="
+  } > "$DIAG_FILE" 2>&1
+  echo "$(date -Iseconds) [$SESSION] diag written: $DIAG_FILE" >> "$LOG"
+  # rotate: keep last 30 diag files per session
+  ls -1t "$DIAG_DIR/$SESSION-"*.txt 2>/dev/null | tail -n +31 | xargs -r rm -f
 }
 
 for entry in "${SESSIONS[@]}"; do
@@ -141,6 +186,7 @@ for entry in "${SESSIONS[@]}"; do
     sleep 30
     if ! pgrep -u "$USER" -f "bun.*server\.ts" > /dev/null 2>&1; then
       echo "$(date -Iseconds) [$SESSION] bun MCP gone 30s → restart + nudge" >> "$LOG"
+      log_diag "$SESSION" "$USER" "$CWD" "$TMUX_CMD" "bun-gone-30s"
       restart_session "$SESSION" "$USER" "$CWD" "$TMUX_CMD"
       sleep 6
       send_nudge "$SESSION" "$TMUX_CMD"
@@ -149,26 +195,18 @@ for entry in "${SESSIONS[@]}"; do
     continue
   fi
 
-  # Pattern 7: bun stuck — process alive but mcp-log file mtime stale.
-  # bun normally writes to /…/.cache/claude-cli-nodejs/-<key>/mcp-logs-plugin-telegram-telegram/*.jsonl
-  # on every Telegram getUpdates poll (~few-sec cadence). If mtime > 5min stale
-  # AND there's a pending unanswered message in pane → bun's polling loop is
-  # frozen but pgrep still sees the process. Kill it; Pattern 4 next iteration
-  # will detect "bun gone 30s" and restart the session.
-  MCP_LOG_DIR="$CWD/.cache/claude-cli-nodejs/-$(echo "$CWD" | sed 's|^/||;s|/|-|g')/mcp-logs-plugin-telegram-telegram"
-  latest_mcp_log=$(ls -t "$MCP_LOG_DIR"/*.jsonl 2>/dev/null | head -1)
-  if [[ -n "$latest_mcp_log" ]]; then
-    log_age=$(( $(date +%s) - $(stat -c %Y "$latest_mcp_log") ))
-    last_inbound_line=$(echo "$pane" | grep -n "← telegram" | tail -1 | cut -d: -f1)
-    last_activity_line=$(echo "$pane" | grep -nE "● |Called plugin:telegram:telegram" | tail -1 | cut -d: -f1)
-    pending_p7=false
-    if [[ -n "$last_inbound_line" ]]; then
-      if [[ -z "$last_activity_line" ]] || [[ "$last_inbound_line" -gt "$last_activity_line" ]]; then
-        pending_p7=true
-      fi
-    fi
-    if [[ "$log_age" -gt 300 ]] && $pending_p7; then
-      echo "$(date -Iseconds) [$SESSION] bun stuck (mcp-log ${log_age}s stale + pending), killing bun" >> "$LOG"
+  # Pattern 7: bun frozen — process alive but heartbeat file mtime stale.
+  # /usr/local/share/telegram-mcp-heartbeat.ts (preloaded via ~/.bunfig.toml)
+  # writes "$CWD/.claude/channels/telegram/bot.heartbeat" every 10s from inside
+  # the bun event loop. If mtime > 60s while bun process is alive → event loop
+  # frozen even though pgrep sees the process. Kill it; Pattern 4 next iteration
+  # detects "bun gone 30s" and restarts. No false-positive on long Claude work,
+  # since heartbeat is independent of MCP request traffic.
+  HB_FILE="$CWD/.claude/channels/telegram/bot.heartbeat"
+  if [[ -f "$HB_FILE" ]] && pgrep -u "$USER" -f "bun.*server\.ts" >/dev/null; then
+    hb_age=$(( $(date +%s) - $(stat -c %Y "$HB_FILE") ))
+    if [[ "$hb_age" -gt 60 ]]; then
+      echo "$(date -Iseconds) [$SESSION] bun frozen (heartbeat ${hb_age}s stale), killing bun" >> "$LOG"
       pkill -9 -u "$USER" -f "bun.*server\.ts" 2>/dev/null
       continue
     fi
