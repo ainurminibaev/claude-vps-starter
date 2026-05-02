@@ -8,6 +8,7 @@ Claude Code в tmux иногда застревает. Причины:
 - Resume-from-summary prompt при ресюме сессии.
 - Упал Bun-процесс MCP-сервера plugin:telegram.
 - Упала сама tmux-сессия.
+- **Bun-процесс жив, но event loop замёрз** — pgrep видит процесс, но он не шлёт getUpdates в Telegram, не отвечает на MCP-запросы. Issue [anthropics/claude-code#36427](https://github.com/anthropics/claude-code/issues/36427) (закрыта not-planned).
 
 Вместо того чтобы каждый раз заходить по SSH и чинить руками, раз в минуту крутится bash-скрипт, который проверяет состояние и чинит.
 
@@ -23,8 +24,9 @@ Claude Code в tmux иногда застревает. Причины:
 4. **Enable auto mode?** Жмёт `1 Enter` (включить).
 5. **Resume from summary?** Жмёт `1 Enter` (да, резюме — оно дешевле).
 6. **Жив ли Bun MCP-процесс?** Если нет — ждёт 30 секунд (Claude Code сам перезапускает MCP), если за это время не поднялся — перезапускает всю tmux-сессию.
+7. **Не завис ли Bun?** Проверяет mtime файла `~/.claude/channels/telegram/bot.heartbeat`. Файл тикает каждые 10 секунд из preload-скрипта внутри bun. Если mtime старше 60 секунд И bun-процесс ещё жив — kill bun, на следующем тике сработает Pattern 6 (bun-gone-30s) и поднимет всю сессию. См. секцию 9 ниже про настройку heartbeat.
 
-Лог каждого действия — в `/var/log/claude-tg-watchdog.log`.
+Лог каждого действия — в `/var/log/claude-tg-watchdog.log`. На каждый рестарт пишется diag-снимок в `/var/log/claude-tg-diag/<session>-<ts>.txt` (хранятся последние 30 на сессию): ps-вывод, tmux pane, debug-лог Claude, lock-файлы — для post-mortem.
 
 ## 2. Установка
 
@@ -112,3 +114,57 @@ SESSIONS=(
 - **API-ключ израсходован.** Watchdog закроет диалог 5 раз, потом рестартанёт, снова закроет. Пока не пополнишь баланс / не обновишь ключ — не заработает. Следи за Telegram-уведомлениями от Anthropic о лимитах.
 - **Неизвестный диалог.** Если появился новый паттерн, которого в скрипте нет — добавь ещё один `if echo "$pane" | grep -qE "..."` блок.
 - **Сеть.** Если сервер оффлайн, watchdog работает, но ответить в Telegram нечем.
+
+## 9. Heartbeat для детектора зависшего Bun (Pattern 7)
+
+### Проблема
+
+Bun MCP-процесс может зависнуть так, что pgrep видит его, но event loop встал — getUpdates к Telegram не идёт, MCP не отвечает. Раньше Pattern 7 пытался ловить это по mtime `mcp-logs-plugin-telegram-telegram/*.jsonl`, но этот файл пишется только при handshake — после старта он замирает навсегда. Получался doom-loop ложноположительных рестартов на любой долгой задаче Claude.
+
+### Решение
+
+Тонкий preload-скрипт пишет файл-сердечник каждые 10s изнутри event loop'а bun. Если loop замёрз — файл стареет. Pattern 7 убивает bun по mtime > 60s.
+
+### Установка
+
+Запустить один раз:
+
+```bash
+sudo /root/projects/claude-vps-starter/scripts/install-bun-wrapper.sh
+```
+
+Что делает скрипт:
+
+1. Кладёт preload `/usr/local/share/telegram-mcp-heartbeat.ts` (строит heartbeat-файл `~/.claude/channels/telegram/bot.heartbeat`).
+2. Заменяет каждый `bun` бинарник на shell-wrapper, который добавляет `--preload` ТОЛЬКО когда вызывается из директории плагина telegram (или с `*.ts` файлом из неё). Остальные `bun install`/`bun upgrade`/etc. идут напрямую в `bun.real`.
+3. Оригинальный bun сохраняется как `bun.real` рядом.
+
+### Зачем wrapper, а не просто `~/.bunfig.toml`
+
+`~/.bunfig.toml` для runtime-preload bun **не читает** (только для `bun install`/dev). Чтобы пережить обновления плагина и не править `package.json` плагина, перехватываем сам бинарник.
+
+### Что переживает что
+
+| Событие | Heartbeat | Wrapper |
+|---|---|---|
+| Обновление плагина (0.0.6 → 0.0.7) | ✓ | ✓ |
+| `bun upgrade` или curl-install бана | ✓ | ✗ (надо перезапустить `install-bun-wrapper.sh`) |
+| Reboot VPS | ✓ | ✓ |
+| Удаление preload-файла | ✗ | — |
+
+### Проверка
+
+```bash
+# heartbeat должен тикать (mtime <30s):
+stat -c '%y' ~/.claude/channels/telegram/bot.heartbeat
+
+# bun должен быть wrapper'ом:
+file /usr/local/bin/bun
+# → POSIX shell script
+
+# bun.real — оригинальный ELF:
+file /usr/local/bin/bun.real
+# → ELF 64-bit LSB pie executable
+```
+
+Если heartbeat не появляется после рестарта bun — посмотри stderr плагина (зависит от инсталляции — обычно через `tail -f /var/log/claude-tg-debug.log`).
