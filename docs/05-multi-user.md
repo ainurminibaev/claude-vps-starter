@@ -282,6 +282,30 @@ ps -u <USER> -o pid,cmd | grep -E 'claude|bun'
 
 ⚠️ Первые 1–3 минуты watchdog может писать `bun MCP gone 30s → restart` — это норма, bun стартует ~30–40с. Если через 3 минуты не стабилизировалось — подними порог `bun MCP gone Xs` в watchdog.
 
+### ВАЖНО: проверить что bun запущен с heartbeat-preload
+
+Pattern 7 watchdog требует, чтобы bun запускался с `--preload /usr/local/share/telegram-mcp-heartbeat.ts`. Без этого heartbeat-файл не создаётся, и watchdog слеп к зависшему bun (см. `docs/04-watchdog.md`, секцию 9). У старых инстансов, где `claude plugin install` выполнялся в уже-запущенной сессии (или плагин ставили вручную через `bun.real run --cwd ...marketplaces/...`), bun стартует со старой команды и сидит «зомби» неделями.
+
+Проверь:
+
+```bash
+# 1. в cmdline должен быть --preload
+ps -eo user,cmd | grep <USER> | grep bun.real
+
+# 2. heartbeat-файл должен быть и тикать (<30s):
+stat -c '%y' /home/<USER>/.claude/channels/telegram/bot.heartbeat
+```
+
+Если в cmdline `--preload telegram-mcp-heartbeat.ts` **нет** или файла heartbeat нет вовсе → bun стартанул со старой команды. Лечение:
+
+```bash
+sudo pkill -9 -u <USER> -f bun.real
+# claude main подхватит за ~30-60с — новый bun стартует уже с --preload
+# контекст диалога не страдает (главный claude процесс не трогаем)
+```
+
+Через минуту повторно проверь — heartbeat должен появиться и тикать.
+
 ## Шаг 10. Bash allow для web-deploy (опционально)
 
 Если новый юзер должен публиковать сайты под /var/www через nginx + ставить SSL — нужно добавить два набора:
@@ -408,6 +432,8 @@ rm /tmp/<USER>-settings.json
 - [ ] `/home/<USER>/.claude.json` имеет `hasCompletedOnboarding: true`
 - [ ] watchdog SESSIONS содержит новую запись
 - [ ] tmux session `claude-tg-<USER>` живёт
+- [ ] `ps -eo cmd | grep bun.real` для юзера содержит `--preload telegram-mcp-heartbeat.ts`
+- [ ] `~/.claude/channels/telegram/bot.heartbeat` существует и mtime < 30s
 - [ ] Telegram-бот отвечает на сообщение от owner
 - [ ] (опционально) sudoers `<USER>-webdeploy` создан, если нужен web-деплой
 - [ ] (опционально) `permissions.allow` в settings.json расширен под web-деплой

@@ -23,6 +23,11 @@ SESSIONS=(
   "claude-tg-user2|user2|/home/user2"
   "claude-tg-user1|user1|/home/user1"
   "claude-tg-user4|user4|/home/user4"
+  "claude-tg-user8|user8|/home/user8"
+  "claude-tg-user7|user7|/home/user7"
+  "claude-tg-user6|user6|/home/user6"
+  "claude-tg-user5|user5|/home/user5"
+  "claude-tg-user9|user9|/home/user9"
 )
 
 # regex of indicators meaning Claude is currently in a turn (don't touch)
@@ -63,6 +68,8 @@ restart_session() {
   if [[ "$USER" == "root" ]]; then
     tmux new-session -d -s "$SESSION" -x 200 -y 50 \
       "export PATH=/root/.bun/bin:\$PATH && cd $CWD && claude $FLAG --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+    sleep 2
+    tmux pipe-pane -t "$SESSION" -o "cat >> /var/log/claude-tg-pane.log"
   else
     sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'cd $CWD && claude $FLAG --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
   fi

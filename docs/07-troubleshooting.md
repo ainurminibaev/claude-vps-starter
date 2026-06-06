@@ -53,6 +53,48 @@ tail -50 /var/log/claude-tg-watchdog.log
 
 5. Проверь rate-limit. Если у Anthropic кончились лимиты на ключ — Claude Code показывает диалог, watchdog его закрывает, но ответа всё равно не будет. Пополни баланс / дождись reset.
 
+## Бот живой по uptime, но «глух»: сообщения не доходят до сессии («bun-зомби»)
+
+Симптом: пользователь шлёт боту 5-10 сообщений за день, **ни одного не получает ответа**, но `tmux ls` показывает сессию живой, `pgrep -af bun.*server.ts` находит процесс с большим uptime (часы/дни). В Telegram у бота даже виден индикатор «печатает» иногда.
+
+Причина: bun-MCP-процесс **жив-зомби** — он принимает Telegram-polling и подтверждает offset на стороне TG (с точки зрения TG API всё доставлено), но **не пушит сообщения в claude main session**. У этой проблемы три источника:
+
+1. **Старая команда запуска без `--preload telegram-mcp-heartbeat.ts`.** Если плагин ставили через `/plugin install` уже в активной сессии, или вручную через `bun.real run --cwd .../marketplaces/.../external_plugins/telegram` — bun стартует без preload. Heartbeat-файл не создаётся, Pattern 7 watchdog не сработает (нечего сравнивать с mtime). См. `docs/04-watchdog.md` секцию 9.
+2. **Event loop bun завис изнутри.** preload честно тикал, но потом залип.
+3. **Сетевая просадка polling.** Бывает крайне редко.
+
+### Диагностика
+
+```bash
+# 1. в cmdline должен быть --preload
+ps -eo user,cmd | grep <USER> | grep bun.real | grep server
+
+# 2. heartbeat должен существовать и быть свежим (<30s):
+stat -c '%y' /home/<USER>/.claude/channels/telegram/bot.heartbeat
+
+# 3. последние пользовательские сообщения в jsonl сессии:
+ls -t /home/<USER>/.claude/projects/-home-<USER>/*.jsonl | head -1 | xargs tail -100 | grep "channel source=\"plugin:telegram" | tail -5
+```
+
+Если в (1) `--preload` отсутствует, или (2) файла нет, или (3) последний `<channel>` старше чем последнее сообщение в Telegram — bun-зомби.
+
+### Лечение
+
+```bash
+sudo pkill -9 -u <USER> -f bun.real
+# claude main подхватит за ~30-60с — новый bun стартует уже с правильной командой
+```
+
+Контекст диалога **не страдает** (главный `claude` процесс не убиваем). Через минуту повторно проверь heartbeat — должен появиться.
+
+### Что с пропущенными сообщениями
+
+К сожалению, пока bun был «зомби», он подтверждал getUpdates-offset → **Telegram считает сообщения доставленными и больше их не отдаёт**. Перешли их в pane вручную через `tmux send-keys` (с инструкцией для бота «эти сообщения от X, ты их не видел из-за техсбоя, разбери и ответь»), либо попроси человека продублировать в чат.
+
+### Профилактика
+
+В чек-листе создания нового инстанса (`docs/05-multi-user.md` → Шаг 9) есть пункт «cmdline bun содержит `--preload`» и «heartbeat свежий». Прогоняй после каждого нового юзера.
+
 ## Whisper не отвечает на голосовые
 
 ```bash
@@ -174,6 +216,8 @@ du -sh /var/log/claude-tg-*.log
 2. `tmux ls` — сессия жива?
 3. `tmux capture-pane -t claude-tg -p | tail -30` — что на экране?
 4. `pgrep -af bun` — MCP жив?
-5. `tail -50 /var/log/claude-tg-debug.log` — ошибки Claude?
-6. `tail -50 /var/log/claude-tg-watchdog.log` — что делал watchdog?
-7. `/telegram:access` в Claude — allowlist в порядке?
+5. `ps -eo cmd | grep bun.real | grep server` — bun запущен с `--preload`?
+6. `stat -c '%y' ~/.claude/channels/telegram/bot.heartbeat` — heartbeat свежий (<30s)?
+7. `tail -50 /var/log/claude-tg-pane.log` (только root) — последний stderr плагина?
+8. `tail -50 /var/log/claude-tg-watchdog.log` — что делал watchdog?
+9. `/telegram:access` в Claude — allowlist в порядке?

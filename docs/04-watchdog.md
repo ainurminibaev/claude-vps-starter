@@ -168,3 +168,38 @@ file /usr/local/bin/bun.real
 ```
 
 Если heartbeat не появляется после рестарта bun — посмотри stderr плагина (зависит от инсталляции — обычно через `tail -f /var/log/claude-tg-debug.log`).
+
+### Если bun уже крутится «зомби» (heartbeat-файла нет)
+
+Слепое пятно Pattern 7: критерий «mtime > 60s» работает только когда файл **существует**. Если bun стартанул со старой команды (без `--preload telegram-mcp-heartbeat.ts`) — файл не создаётся вообще, и watchdog молча проходит мимо. Бот при этом может выглядеть живым (`pgrep bun.*server.ts` его видит, MCP отвечает на pairing), но входящие Telegram-сообщения не попадают в claude main — это «bun-зомби».
+
+Как проверить:
+
+```bash
+# 1. cmdline активного bun: должен содержать --preload
+ps -eo cmd | grep bun.real | grep server
+
+# 2. файл должен быть и быть свежим (<30s):
+stat -c '%y' /home/<user>/.claude/channels/telegram/bot.heartbeat
+```
+
+Если в cmdline `--preload` отсутствует → bun стартанул со старой версии команды. Это типично для инстансов, где `/plugin install` выполнялся внутри уже-запущенной claude-сессии **до** того, как был установлен heartbeat-wrapper (или плагин ставился старой командой `bun.real run --cwd ...marketplaces/...`). Лечится одной командой:
+
+```bash
+sudo pkill -9 -u <user> -f bun.real
+# claude main подхватит за ~30-60с — новый bun стартует уже с --preload
+```
+
+Контекст диалога **не страдает** (главный `claude` процесс не трогается). MCP-handshake переустанавливается, новые TG-сообщения снова начинают приходить.
+
+## 10. Pane-логирование для root (`/var/log/claude-tg-pane.log`)
+
+Stderr Claude Code (включая ошибки bun-плагина) через tmux в обычный лог-файл не попадает: redirect `2>>/var/log/claude-tg-debug.log` в строке запуска не наследуется в bun-child, а tmux буферизует pane. Чтобы видеть полный поток для разбора инцидентов, watchdog навешивает `tmux pipe-pane` после старта сессии root:
+
+```bash
+tmux pipe-pane -t "$SESSION" -o "cat >> /var/log/claude-tg-pane.log"
+```
+
+Этот лог получает **весь видимый вывод** root-pane: spinner, tool calls, ошибки, stderr плагина. Включён только для root (multi-user сессии не пишут — чтобы не утекало в общий лог).
+
+При следующем рестарте watchdog снова повесит pipe-pane (он одноразовый — слетает с killed-сессией). Ротация — через `disk-cleanup.sh` (см. `docs/01-install.md`) когда файл вырастет до 50M.
