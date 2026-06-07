@@ -25,6 +25,7 @@ Claude Code в tmux иногда застревает. Причины:
 5. **Resume from summary?** Жмёт `1 Enter` (да, резюме — оно дешевле).
 6. **Жив ли Bun MCP-процесс?** Если нет — ждёт 30 секунд (Claude Code сам перезапускает MCP), если за это время не поднялся — перезапускает всю tmux-сессию.
 7. **Не завис ли Bun?** Проверяет mtime файла `~/.claude/channels/telegram/bot.heartbeat`. Файл тикает каждые 10 секунд из preload-скрипта внутри bun. Если mtime старше 60 секунд И bun-процесс ещё жив — kill bun, на следующем тике сработает Pattern 6 (bun-gone-30s) и поднимет всю сессию. См. секцию 9 ниже про настройку heartbeat.
+8. **AskUserQuestion / интерактивная модалка?** Если в pane видно `Enter to select … Esc to cancel` или `Enter to confirm … Esc to cancel` — шлёт Escape. Это резервная защита: бот **не должен** использовать `AskUserQuestion` в Telegram-канале (правило в CLAUDE.md, см. [06-rules-claudemd.md §10](06-rules-claudemd.md)), но если случайно вызвал — главный turn зависает до Esc, и Pattern 8 его снимает. Без этого бот молчит часами.
 
 Лог каждого действия — в `/var/log/claude-tg-watchdog.log`. На каждый рестарт пишется diag-снимок в `/var/log/claude-tg-diag/<session>-<ts>.txt` (хранятся последние 30 на сессию): ps-вывод, tmux pane, debug-лог Claude, lock-файлы — для post-mortem.
 

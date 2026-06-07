@@ -187,6 +187,14 @@ for entry in "${SESSIONS[@]}"; do
     echo "$(date -Iseconds) [$SESSION] chose resume-from-summary" >> "$LOG"
     continue
   fi
+  # Pattern 8: AskUserQuestion / interactive select modal (TUI-only, не для TG)
+  if echo "$pane" | grep -qE "Enter to select.*Esc to cancel|Enter to confirm.*Esc to cancel"; then
+    $TMUX_CMD send-keys -t "$SESSION" Escape 2>/dev/null
+    echo "$(date -Iseconds) [$SESSION] dismissed AskUserQuestion modal" >> "$LOG"
+    sleep 1
+  fi
+
+
 
   # Pattern 4: bun MCP died — grace 30s then restart
   if ! pgrep -u "$USER" -f "bun.*server\.ts" > /dev/null 2>&1; then
