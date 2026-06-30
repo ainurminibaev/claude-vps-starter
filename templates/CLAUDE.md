@@ -154,3 +154,11 @@ Read автокодирует файлы с image-расширениями (.png
 **Canva-специфика:** thumbnail-URLs из `magic_design`/`generate_designs` (вида `https://design.canva.ai/...`) НЕ для прямого скачивания — это превью с auth/referrer. `curl` на них вернёт HTML, не PNG. Используй `export_design` или эквивалентный tool у Canva MCP, который отдаёт реальный download URL или blob.
 
 Если уже наскачивал и не уверен — `file /tmp/*.png` сначала.
+
+## 🔁 Всегда push после commit в infra-репо
+
+Любой `git commit` в `claude-vps-starter/` (или других infra-репо VPS) — **сразу** `git push origin <branch>`. Не оставлять локальный коммит без push.
+
+**Why:** Без push изменения не в git, при пересоздании VPS придётся восстанавливать руками.
+
+**How to apply:** В одном toolcall с `git commit` или сразу следом.
