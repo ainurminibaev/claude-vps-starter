@@ -1,0 +1,16 @@
+[Unit]
+Description=Auth bot for claude-tg root (automated OAuth /login flow)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/auth-bot/env
+ExecStart=/usr/bin/python3 /usr/local/bin/auth-bot.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/auth-bot.log
+StandardError=append:/var/log/auth-bot.log
+
+[Install]
+WantedBy=multi-user.target
