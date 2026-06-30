@@ -140,52 +140,51 @@ monitor_state = {
 }
 
 
-def trigger_login_flow(reason="auto", first_attempt=True):
+def issue_fresh_url(retry=False):
     """
-    Запускает /login, шлёт URL Айнуру.
-    Устанавливает pending_code=True чтобы команда-handler знал что следующий код-сообщение
-    — это OAuth-ответ.
+    Запускает /login в pane, достаёт URL, шлёт пользователю.
+    Используется по команде /login или после expired-кода. URL валиден ~10 минут.
+    Устанавливает pending_code=True чтобы handler знал что следующий код — OAuth-ответ.
     """
-    monitor_state["alert_in_progress"] = True
     try:
         url = start_login_and_get_url()
         if not url:
-            send(OWNER_CHAT_ID, f"⚠️ auth-bot ({reason}): не получилось достать URL из pane. Зайди руками: ssh, tmux attach -t {SESSION}, /login")
-            monitor_state["alert_in_progress"] = False
+            send(OWNER_CHAT_ID, f"⚠️ Не получилось достать URL из pane. Зайди руками: ssh vps-ainur-hostinger, tmux attach -t {SESSION}, /login")
             return False
-
         monitor_state["pending_code"] = True
-        if first_attempt:
-            text = f"🔐 root credentials.json протух ({reason}). Перелогинься:\n\n{url}\n\nПод praim199524@gmail.com (Max). Пришли код сюда — я вставлю автоматически."
+        if retry:
+            text = f"🔁 Старая ссылка протухла. Держи свежую (10 мин):\n\n{url}"
         else:
-            text = f"🔁 Старая ссылка протухла. Держи свежую:\n\n{url}\n\nКод живёт 10 минут."
+            text = f"🔐 Перелогинься (под praim199524@gmail.com, Max — ссылка живёт 10 минут):\n\n{url}\n\nПришли код сюда — я вставлю автоматически."
         send(OWNER_CHAT_ID, text)
-        log(f"URL отправлен ({reason}, first_attempt={first_attempt})")
-        monitor_state["alert_in_progress"] = False
+        log(f"URL отправлен (retry={retry})")
         return True
     except Exception as e:
-        log(f"trigger_login_flow error: {e}\n{traceback.format_exc()}")
-        monitor_state["alert_in_progress"] = False
+        log(f"issue_fresh_url error: {e}\n{traceback.format_exc()}")
         return False
 
 
 def monitor_loop():
+    """
+    Раз в CHECK_INTERVAL проверяет credentials.json.
+    Если refreshToken=0 → шлёт ТОЛЬКО уведомление (без URL — он бы протух за 10 мин).
+    Пользователь сам пришлёт /login когда сможет — тогда сгенерим свежий URL.
+    Cooldown ALERT_COOLDOWN между алертами чтоб не спамить.
+    """
     log("monitor thread started")
     while True:
         try:
             rl = get_refresh_len()
             if rl > 30:
-                # creds OK → reset cooldown
                 monitor_state["last_alert"] = 0
             else:
-                # creds broken
                 now = time.time()
-                if monitor_state["alert_in_progress"]:
-                    pass  # сейчас уже шлём URL, не дублируем
-                elif now - monitor_state["last_alert"] >= ALERT_COOLDOWN:
-                    log(f"creds broken (refreshToken={rl}) → trigger login flow")
-                    if trigger_login_flow("auto-check", first_attempt=True):
-                        monitor_state["last_alert"] = now
+                if now - monitor_state["last_alert"] >= ALERT_COOLDOWN:
+                    log(f"creds broken (refreshToken={rl}) → notify owner")
+                    send(OWNER_CHAT_ID,
+                         "⚠️ root credentials.json протух (refreshToken=0). "
+                         "Когда сможешь — пришли мне /login, я сгенерирую свежую ссылку (живёт 10 мин).")
+                    monitor_state["last_alert"] = now
             time.sleep(CHECK_INTERVAL)
         except Exception as e:
             log(f"monitor error: {e}")
@@ -203,8 +202,8 @@ def handle_message(msg):
     if text == "/start":
         send(chat_id, "✅ Auth-бот готов. Команды:\n/login — ручной запуск перелогина\n/status — текущий статус credentials\n\nКоды OAuth (формат XXX#YYY) вставляются автоматически.")
     elif text == "/login":
-        send(chat_id, "Запускаю /login flow...")
-        trigger_login_flow("manual /login", first_attempt=True)
+        send(chat_id, "Генерирую свежую ссылку...")
+        issue_fresh_url(retry=False)
     elif text == "/status":
         rl = get_refresh_len()
         eh = get_expires_h()
@@ -221,9 +220,8 @@ def handle_message(msg):
             nudge_claude()
             log("login OK")
         else:
-            # код не подошёл — auto-retry
             send(chat_id, "❌ Код не принят (скорее всего expired). Генерирую новую ссылку…")
-            trigger_login_flow("retry after expired", first_attempt=False)
+            issue_fresh_url(retry=True)
     else:
         # игнорируем прочее
         pass
