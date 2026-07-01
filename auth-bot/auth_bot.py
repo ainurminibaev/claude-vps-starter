@@ -1,33 +1,47 @@
 #!/usr/bin/env python3
 """
-auth_bot.py — отдельный TG бот для управления OAuth-логином root claude-tg.
+auth_bot.py — отдельный TG-бот для управления OAuth-логином всех 9 claude-tg ботов на VPS.
 
 Архитектура:
-- Свой собственный TG-бот (свой токен) → 0 конфликтов с основным MCP-плагином
-- Long-polling getUpdates (свой токен)
-- Каждые 60 сек проверяет /root/.claude/.credentials.json:
-  - refreshToken есть → молчит
-  - refreshToken пуст → запускает /login в pane claude-tg, шлёт URL Айнуру
-- Принимает от Айнура:
-  - /start            → запоминает chat_id
-  - /login            → ручной запуск flow
-  - /status           → текущий refreshToken status + last expires
-  - <OAuth-код>       → вставляет в pane, проверяет Login successful, шлёт ✅
-- При expired code → автоматически перегенерирует URL «🔁 держи новую»
-- Cooldown 1 алерт/час чтобы не спамить
+- Собственный TG-бот со своим токеном (0 конфликтов с polling основных MCP-плагинов)
+- Long-polling getUpdates
+- В фоне каждые 60 сек проверяет credentials.json КАЖДОГО из 9 ботов
+- Если refreshToken=0 → шлёт уведомление владельцу ("⚠️ <name> протух, пришли /login <name>")
+- Cooldown 1 час на каждый бот отдельно (не спамим)
+
+Команды от владельца:
+- /start                     — приветствие
+- /status                    — сводка по всем 9
+- /status <name>             — конкретный
+- /login <name>              — генерит свежий URL (запускает /login в pane нужного pane)
+- <OAuth-код XXX#YYY>        — вставляется в pane того бота, для которого был последний /login
+- При expired code → авто-перегенерирует URL
+
+Работает под root: для чужих tmux-сессий использует `sudo -u <user> tmux ...`.
 """
 import json, os, sys, re, time, subprocess, threading, traceback
 import urllib.request, urllib.parse, urllib.error
 
 TOKEN = os.environ.get("AUTH_BOT_TOKEN", "").strip()
 OWNER_CHAT_ID = int(os.environ.get("OWNER_CHAT_ID", "105839411"))
-SESSION = os.environ.get("TMUX_SESSION", "claude-tg")
-CREDS = os.environ.get("CREDS_PATH", "/root/.claude/.credentials.json")
 STATE_DIR = "/var/lib/auth-bot"
 LOG = "/var/log/auth-bot.log"
-CHECK_INTERVAL = 60        # сек между авто-проверками credentials
-ALERT_COOLDOWN = 3600      # 1 час между алертами «снова broken»
+CHECK_INTERVAL = 60
+ALERT_COOLDOWN = 3600
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{30,}#[A-Za-z0-9_-]{20,}$")
+
+# Реестр всех 9 ботов. Ключ — короткий alias, используется в командах.
+BOTS = {
+    "root":    {"user": "root",              "session": "claude-tg",                    "creds": "/root/.claude/.credentials.json"},
+    "wife":    {"user": "wife",              "session": "claude-tg-wife",               "creds": "/home/wife/.claude/.credentials.json"},
+    "rafka":   {"user": "rafka",             "session": "claude-tg-rafka",              "creds": "/home/rafka/.claude/.credentials.json"},
+    "bulatov": {"user": "bulatov",           "session": "claude-tg-bulatov",            "creds": "/home/bulatov/.claude/.credentials.json"},
+    "alfiya":  {"user": "alfiya-mama-rafka", "session": "claude-tg-alfiya-mama-rafka",  "creds": "/home/alfiya-mama-rafka/.claude/.credentials.json"},
+    "rishat":  {"user": "rishat-rafka-papa", "session": "claude-tg-rishat-rafka-papa",  "creds": "/home/rishat-rafka-papa/.claude/.credentials.json"},
+    "khazrat": {"user": "khazrat",           "session": "claude-tg-khazrat",            "creds": "/home/khazrat/.claude/.credentials.json"},
+    "niyaz":   {"user": "niyaz",             "session": "claude-tg-niyaz",              "creds": "/home/niyaz/.claude/.credentials.json"},
+    "diana":   {"user": "diana",             "session": "claude-tg-diana",              "creds": "/home/diana/.claude/.credentials.json"},
+}
 
 os.makedirs(STATE_DIR, exist_ok=True)
 API = f"https://api.telegram.org/bot{TOKEN}"
@@ -68,130 +82,161 @@ def send(chat_id, text):
     return r
 
 
-def tmux(*args):
-    return subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=10)
+def tmux(bot_name, *args):
+    """
+    Обёртка над tmux. Для root — прямой вызов, для остальных — через sudo -u <user>
+    (потому что tmux-сервер у каждого пользователя свой).
+    """
+    user = BOTS[bot_name]["user"]
+    cmd = ["tmux", *args] if user == "root" else ["sudo", "-u", user, "tmux", *args]
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
 
 
-def capture_pane(lines=80):
-    r = tmux("capture-pane", "-t", SESSION, "-p", "-S", f"-{lines}")
+def capture_pane(bot_name, lines=80):
+    session = BOTS[bot_name]["session"]
+    r = tmux(bot_name, "capture-pane", "-t", session, "-p", "-S", f"-{lines}")
     return r.stdout if r.returncode == 0 else ""
 
 
-def get_refresh_len():
+def send_keys(bot_name, *args):
+    session = BOTS[bot_name]["session"]
+    return tmux(bot_name, "send-keys", "-t", session, *args)
+
+
+def get_refresh_len(bot_name):
     try:
-        d = json.load(open(CREDS))
+        d = json.load(open(BOTS[bot_name]["creds"]))
         return len(str(d.get("claudeAiOauth", {}).get("refreshToken", "")))
     except Exception:
         return 0
 
 
-def get_expires_h():
+def get_expires_h(bot_name):
     try:
-        d = json.load(open(CREDS))
+        d = json.load(open(BOTS[bot_name]["creds"]))
         ex = d.get("claudeAiOauth", {}).get("expiresAt", 0)
         return (ex / 1000 - time.time()) / 3600
     except Exception:
         return 0
 
 
-def start_login_and_get_url():
-    """Запускает /login в pane и возвращает URL. None если не получилось."""
-    tmux("send-keys", "-t", SESSION, "Escape")
+def start_login_and_get_url(bot_name):
+    """Запускает /login в pane бота, возвращает URL или None."""
+    send_keys(bot_name, "Escape")
     time.sleep(1)
-    tmux("send-keys", "-t", SESSION, "Escape")
+    send_keys(bot_name, "Escape")
     time.sleep(1)
-    tmux("send-keys", "-t", SESSION, "-l", "/login")
+    send_keys(bot_name, "-l", "/login")
     time.sleep(0.3)
-    tmux("send-keys", "-t", SESSION, "Enter")
+    send_keys(bot_name, "Enter")
     time.sleep(3)
-    tmux("send-keys", "-t", SESSION, "Enter")  # option 1
+    send_keys(bot_name, "Enter")  # опция 1
     time.sleep(5)
-    pane = capture_pane(50).replace("\n", "")
+    pane = capture_pane(bot_name, 50).replace("\n", "")
     m = re.search(r"https://claude\.com/cai/oauth/authorize\?[^\s]+", pane)
     return m.group(0) if m else None
 
 
-def submit_code(code):
-    """Вставляет код в pane. Returns True если Login successful детектирован."""
-    tmux("send-keys", "-t", SESSION, "-l", code)
+def submit_code(bot_name, code):
+    """Вставляет код в pane бота. True если Login successful."""
+    send_keys(bot_name, "-l", code)
     time.sleep(0.5)
-    tmux("send-keys", "-t", SESSION, "Enter")
+    send_keys(bot_name, "Enter")
     time.sleep(10)
-    pane = capture_pane(30)
+    pane = capture_pane(bot_name, 30)
     if "Login successful" in pane or "Logged in as" in pane:
-        tmux("send-keys", "-t", SESSION, "Enter")  # close modal
+        send_keys(bot_name, "Enter")  # закрыть модалку
         time.sleep(2)
-        return get_refresh_len() > 30
+        return get_refresh_len(bot_name) > 30
     return False
 
 
-def nudge_claude():
-    """Пнуть claude обработать накопившиеся сообщения."""
-    tmux("send-keys", "-t", SESSION, "-l", "Перелогинились автоматически. Проверь TG inbox.")
+def nudge_claude(bot_name, hours_offline=None):
+    """Пнуть claude в этом pane обработать накопившиеся сообщения."""
+    if hours_offline and hours_offline > 24:
+        text = f"Перелогинились после {hours_offline:.0f}ч простоя. Проверь TG inbox — самое важное первым, не всё сразу."
+    else:
+        text = "Перелогинились. Проверь TG inbox и ответь на пропущенное."
+    send_keys(bot_name, "-l", text)
     time.sleep(0.3)
-    tmux("send-keys", "-t", SESSION, "Enter")
+    send_keys(bot_name, "Enter")
 
 
-# --- monitor thread: проверяет credentials каждые 60 сек ---
-monitor_state = {
-    "last_alert": 0,
-    "pending_code": None,        # ждём код от пользователя
-    "alert_in_progress": False,  # уже шлём алерт сейчас
-}
+# --- state ---
+last_alert = {name: 0.0 for name in BOTS}
+pending_code_for = {"name": None}  # какой бот ждёт свой OAuth-код
 
 
-def issue_fresh_url(retry=False):
-    """
-    Запускает /login в pane, достаёт URL, шлёт пользователю.
-    Используется по команде /login или после expired-кода. URL валиден ~10 минут.
-    Устанавливает pending_code=True чтобы handler знал что следующий код — OAuth-ответ.
-    """
+# --- login flow ---
+def issue_fresh_url(bot_name, retry=False):
+    """Генерит свежий URL для конкретного бота и шлёт владельцу."""
     try:
-        url = start_login_and_get_url()
+        url = start_login_and_get_url(bot_name)
         if not url:
-            send(OWNER_CHAT_ID, f"⚠️ Не получилось достать URL из pane. Зайди руками: ssh vps-ainur-hostinger, tmux attach -t {SESSION}, /login")
+            send(OWNER_CHAT_ID, f"⚠️ {bot_name}: не получилось достать URL из pane. Зайди руками: sudo -u {BOTS[bot_name]['user']} tmux attach -t {BOTS[bot_name]['session']}, /login")
             return False
-        monitor_state["pending_code"] = True
+        pending_code_for["name"] = bot_name
         if retry:
-            text = f"🔁 Старая ссылка протухла. Держи свежую (10 мин):\n\n{url}"
+            text = f"🔁 {bot_name}: старая ссылка протухла. Держи свежую (10 мин):\n\n{url}"
         else:
-            text = f"🔐 Перелогинься (под praim199524@gmail.com, Max — ссылка живёт 10 минут):\n\n{url}\n\nПришли код сюда — я вставлю автоматически."
+            text = f"🔐 Перелогинь **{bot_name}** (10 минут):\n\n{url}\n\nПришли код сюда — я вставлю."
         send(OWNER_CHAT_ID, text)
-        log(f"URL отправлен (retry={retry})")
+        log(f"{bot_name}: URL отправлен (retry={retry})")
         return True
     except Exception as e:
-        log(f"issue_fresh_url error: {e}\n{traceback.format_exc()}")
+        log(f"{bot_name}: issue_fresh_url error: {e}\n{traceback.format_exc()}")
         return False
 
 
+# --- monitor thread ---
 def monitor_loop():
-    """
-    Раз в CHECK_INTERVAL проверяет credentials.json.
-    Если refreshToken=0 → шлёт ТОЛЬКО уведомление (без URL — он бы протух за 10 мин).
-    Пользователь сам пришлёт /login когда сможет — тогда сгенерим свежий URL.
-    Cooldown ALERT_COOLDOWN между алертами чтоб не спамить.
-    """
     log("monitor thread started")
     while True:
         try:
-            rl = get_refresh_len()
-            if rl > 30:
-                monitor_state["last_alert"] = 0
-            else:
-                now = time.time()
-                if now - monitor_state["last_alert"] >= ALERT_COOLDOWN:
-                    log(f"creds broken (refreshToken={rl}) → notify owner")
-                    send(OWNER_CHAT_ID,
-                         "⚠️ root credentials.json протух (refreshToken=0). "
-                         "Когда сможешь — пришли мне /login, я сгенерирую свежую ссылку (живёт 10 мин).")
-                    monitor_state["last_alert"] = now
+            now = time.time()
+            for name in BOTS:
+                rl = get_refresh_len(name)
+                if rl > 30:
+                    last_alert[name] = 0
+                else:
+                    if now - last_alert[name] >= ALERT_COOLDOWN:
+                        eh = get_expires_h(name)
+                        hours_off = max(0, -eh)
+                        log(f"{name}: creds broken (refreshToken={rl}, offline {hours_off:.1f}h) → notify owner")
+                        send(OWNER_CHAT_ID,
+                             f"⚠️ {name} credentials.json протух (refreshToken=0, offline {hours_off:.0f}h).\n"
+                             f"Пришли `/login {name}` — сгенерю свежую ссылку.")
+                        last_alert[name] = now
             time.sleep(CHECK_INTERVAL)
         except Exception as e:
-            log(f"monitor error: {e}")
+            log(f"monitor error: {e}\n{traceback.format_exc()}")
             time.sleep(CHECK_INTERVAL)
 
 
-# --- main thread: TG bot polling ---
+# --- status ---
+def status_all():
+    lines = ["📊 Статус всех 9 ботов:\n"]
+    for name in BOTS:
+        rl = get_refresh_len(name)
+        eh = get_expires_h(name)
+        if rl > 30:
+            lines.append(f"✅ {name}: OK ({eh:+.1f}h)")
+        else:
+            hours_off = max(0, -eh)
+            lines.append(f"❌ {name}: BROKEN (offline {hours_off:.0f}h)")
+    return "\n".join(lines)
+
+
+def status_one(name):
+    if name not in BOTS:
+        return f"❌ Неизвестный бот: {name}\nДоступны: {', '.join(BOTS.keys())}"
+    rl = get_refresh_len(name)
+    eh = get_expires_h(name)
+    ok = rl > 30
+    return f"{'✅' if ok else '❌'} {name}\nrefreshToken: {rl} chars\nexpires: {eh:+.1f}h\nstatus: {'OK' if ok else 'BROKEN'}"
+
+
+# --- TG handlers ---
 def handle_message(msg):
     chat_id = msg.get("chat", {}).get("id")
     text = (msg.get("text") or "").strip()
@@ -199,34 +244,59 @@ def handle_message(msg):
         log(f"ignoring chat_id={chat_id} (not owner)")
         return
 
-    if text == "/start":
-        send(chat_id, "✅ Auth-бот готов. Команды:\n/login — ручной запуск перелогина\n/status — текущий статус credentials\n\nКоды OAuth (формат XXX#YYY) вставляются автоматически.")
-    elif text == "/login":
-        send(chat_id, "Генерирую свежую ссылку...")
-        issue_fresh_url(retry=False)
-    elif text == "/status":
-        rl = get_refresh_len()
-        eh = get_expires_h()
-        send(chat_id, f"refreshToken: {rl} chars\nexpires: {eh:+.1f}h from now\nstatus: {'✅ OK' if rl > 30 else '❌ BROKEN'}")
-    elif CODE_RE.match(text):
-        if not monitor_state["pending_code"]:
-            send(chat_id, "⚠️ Похоже на OAuth-код, но я не ждал. Игнорирую. /login для запуска.")
-            return
-        ok = submit_code(text)
-        monitor_state["pending_code"] = False
-        if ok:
-            rl = get_refresh_len()
-            send(chat_id, f"✅ Авторизация успешна. refreshToken={rl} chars, +8h до expires.")
-            nudge_claude()
-            log("login OK")
+    parts = text.split(maxsplit=1)
+    cmd = parts[0] if parts else ""
+    arg = parts[1].strip() if len(parts) > 1 else ""
+
+    if cmd == "/start":
+        botlist = ", ".join(BOTS.keys())
+        send(chat_id,
+             "✅ Auth-бот готов. Команды:\n"
+             "/status — сводка по всем 9\n"
+             "/status <name> — конкретный\n"
+             "/login <name> — генерит свежую ссылку\n\n"
+             f"Боты: {botlist}\n\n"
+             "OAuth-коды (XXX#YYY) вставляются автоматически в pane того бота,\n"
+             "для которого был последний /login.")
+
+    elif cmd == "/status":
+        if arg:
+            send(chat_id, status_one(arg))
         else:
-            send(chat_id, "❌ Код не принят (скорее всего expired). Генерирую новую ссылку…")
-            issue_fresh_url(retry=True)
+            send(chat_id, status_all())
+
+    elif cmd == "/login":
+        if not arg or arg not in BOTS:
+            send(chat_id, f"❌ Укажи бот: /login <name>\nДоступны: {', '.join(BOTS.keys())}")
+            return
+        send(chat_id, f"Генерирую ссылку для {arg}...")
+        issue_fresh_url(arg, retry=False)
+
+    elif CODE_RE.match(text):
+        target = pending_code_for["name"]
+        if not target:
+            send(chat_id, "⚠️ Похоже на OAuth-код, но я не ждал. Начни с /login <name>.")
+            return
+        send(chat_id, f"Вставляю в {target}…")
+        ok = submit_code(target, text)
+        pending_code_for["name"] = None
+        if ok:
+            rl = get_refresh_len(target)
+            eh_before = get_expires_h(target)
+            offline = max(0, -eh_before) if eh_before < 0 else None
+            hours_off_msg = f" (был offline {offline:.0f}ч)" if offline else ""
+            send(chat_id, f"✅ {target}: авторизация успешна. refreshToken={rl}, +8h до expires{hours_off_msg}.")
+            nudge_claude(target, hours_offline=offline)
+            log(f"{target}: login OK")
+        else:
+            send(chat_id, f"❌ {target}: код не принят (expired?). Генерирую новую ссылку…")
+            issue_fresh_url(target, retry=True)
+
     else:
-        # игнорируем прочее
         pass
 
 
+# --- poll loop ---
 def poll_loop():
     log("poll loop started")
     offset_path = f"{STATE_DIR}/offset"
@@ -240,10 +310,7 @@ def poll_loop():
 
     while True:
         try:
-            r = http(f"{API}/getUpdates", {
-                "offset": offset,
-                "timeout": "30",
-            }, timeout=40)
+            r = http(f"{API}/getUpdates", {"offset": offset, "timeout": "30"}, timeout=40)
             if not r.get("ok"):
                 log(f"getUpdates fail: {r}")
                 time.sleep(5)
@@ -264,9 +331,7 @@ def main():
     if not TOKEN:
         log("AUTH_BOT_TOKEN env not set, exiting")
         sys.exit(1)
-    # стартует monitor в фоне
     threading.Thread(target=monitor_loop, daemon=True).start()
-    # main thread — TG polling
     poll_loop()
 
 
