@@ -28,6 +28,7 @@ SESSIONS=(
   "claude-tg-khazrat|khazrat|/home/khazrat"
   "claude-tg-niyaz|niyaz|/home/niyaz"
   "claude-tg-diana|diana|/home/diana"
+  "claude-tg-ilshat|ilshat|/home/ilshat|4c1bd9d6-13c2-442f-aa49-05593626bc16"
 )
 
 # regex of indicators meaning Claude is currently in a turn (don't touch)
