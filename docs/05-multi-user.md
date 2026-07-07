@@ -1,452 +1,291 @@
 # 05. Multi-user — отдельный аккаунт на том же VPS
 
-Эта инструкция — как добавить новый изолированный Claude-агент (отдельный Linux-юзер + отдельный Telegram-бот + отдельная память) на ту же машину, где уже работает основной (root) агент.
+Настраиваем ещё одного человека (сотрудник, ребёнок, друг) — со своим Claude-инстансом и своим Telegram-ботом. Всё через отдельного Linux-юзера (безопасно, независимо, легко откатить).
 
-Проверено на сетапе rafka (2026-04-29). Обходит все грабли, на которые наступили в первый раз.
+## Быстрый старт (одна команда)
 
-## Зачем отдельный Linux-юзер
+**Перед запуском:**
 
-- **Изоляция памяти.** `~/.claude/projects/.../memory/` у каждого своя. Контексты не смешиваются.
-- **Изоляция кода.** Разные `$HOME`, разные права, файлы не пересекаются.
-- **Изоляция MCP-стейта.** У `plugin:telegram` своя `access.json`, свой `inbox/`.
-- **Отдельный биллинг.** Свой Claude-аккаунт (subscription или API key) — расход видно отдельно.
-- **Безопасность.** Поломка одного агента не компрометирует другой.
+1. Создай бота в `@BotFather` → сохрани токен.
+2. Узнай TG-ID владельца через `@userinfobot` — числовой ID, не username.
+3. **Владелец должен открыть бота и нажать `/start`** — иначе TG не заведёт chat_id для него, и бот его не увидит (тест: `getChat` вернёт `chat not found`).
+
+**Одна команда развернёт всё:**
+
+```bash
+sudo /root/projects/claude-vps-starter/scripts/add-second-user.sh <username> \
+  --tg-token <bot_token> \
+  --tg-user-id <owner_tg_id> \
+  [--extra-allow <id>,<id>]
+```
+
+Пример (10-й бот, Ильшат):
+```bash
+sudo /root/projects/claude-vps-starter/scripts/add-second-user.sh ilshat \
+  --tg-token 8839430682:AAG... \
+  --tg-user-id 976870658 \
+  --extra-allow 105839411
+```
+
+Что скрипт делает автоматом:
+- Заводит Linux-юзера (пароль заблокирован, всё через `sudo -u`).
+- Скелет `.claude/`: `settings.json`, `hooks/stop-autoreply.py`, `scripts/send_tg.sh`.
+- `channels/telegram/.env` (chmod 600) + `access.json` с allowlist.
+- `.claude.json` с `hasCompletedOnboarding=true, bypassPermissionsModeAccepted=true`.
+- Регистрирует в `SESSIONS` watchdog (repo + deployed).
+- Регистрирует в `BOTS` auth-bot (repo + deployed), перезапускает `auth-bot.service`.
+- Прогоняет verification-чек.
+
+**После скрипта (OAuth):**
+
+1. В Telegram напиши auth-bot команду: `/login <username>` → пришлёт OAuth URL.
+2. Открой URL, войди в свой Claude Max, скопируй код.
+3. Пришли код обратно auth-bot'у — он вставит в pane, дождётся `Login successful`.
+4. Через 30–60с watchdog запустит tmux сессию `claude-tg-<username>` с флагом `--channels plugin:telegram@claude-plugins-official` и пошлёт **first-boot nudge** (иначе клод сидит в welcome screen без активного канала).
+5. Владелец пишет боту → бот отвечает.
+
+## Проверки (когда что-то не так)
+
+Ходи по этому списку сверху вниз, останавливайся на первом FAIL:
+
+```bash
+# 1. Bot API живой (getMe)
+curl -s "https://api.telegram.org/bot<TOKEN>/getMe" | jq '.ok'      # ожидаем: true
+
+# 2. Bun MCP реально ловит long-polling
+curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | jq '.error_code'
+# ожидаем: 409 (Conflict: terminated by other getUpdates) — это значит bun-процесс уже долгопуллит
+
+# 3. Chat с владельцем существует
+curl -s "https://api.telegram.org/bot<TOKEN>/getChat?chat_id=<owner_id>" | jq '.ok'
+# true = ок, false с 'chat not found' = владелец ещё не нажал /start у своего бота
+
+# 4. OAuth credentials свежие
+python3 -c "import json,time; d=json.load(open('/home/<u>/.claude/.credentials.json'))['claudeAiOauth']; print(len(d['refreshToken']),'chars,',round((d['expiresAt']/1000-time.time())/3600,1),'h left')"
+# ожидаем: refreshToken ≥100 chars, expires >0h
+
+# 5. Bun MCP heartbeat не старше 30 сек
+stat -c '%y' /home/<u>/.claude/channels/telegram/bot.heartbeat
+
+# 6. Plugin telegram установлен
+jq -e '.plugins["telegram@claude-plugins-official"]' /home/<u>/.claude/plugins/installed_plugins.json
+
+# 7. .claude.json > 20 KB (значит клод хоть раз стартанул полноценно)
+ls -la /home/<u>/.claude.json
+
+# 8. Watchdog log — session boot прошёл
+sudo tail -20 /var/log/claude-tg-watchdog.log | grep <username>
+# ищи: `bootstrap new session ...` → `confirmed workspace trust` → `first-boot nudge sent`
+
+# 9. tmux session жива
+sudo -u <u> tmux ls | grep claude-tg-<u>
+```
+
+## Симптомы → решения
+
+| Симптом | Причина | Решение |
+|---------|---------|---------|
+| `getChat` → `chat not found` | Владелец не нажимал `/start` у своего бота | Пусть откроет бота в TG и нажмёт `/start` |
+| В pane заглушка `Try "how does <filepath> work?"` и никаких TG-событий | Клод стартовал **без** `--channels plugin:telegram@claude-plugins-official` — канал не активен | Kill session (`sudo -u <u> tmux kill-session -t claude-tg-<u>`) — watchdog поднимет правильно с first-boot nudge |
+| Бот показывает `typing…` и молчит | MCP получает, но клод не подписан на канал | То же — kill session |
+| Клод ответил один раз и потом молчит | Обычно stop-hook не может писать `send_tg.sh` (отсутствует под юзером) | Проверь `/home/<u>/.claude/scripts/send_tg.sh` — `add-second-user.sh` v2 копирует автоматом |
+| `refreshToken` короткий или отсутствует | Credentials протухли/побились | В auth-bot: `/login <username>`, повтори OAuth flow |
+| Watchdog log спамит `session missing → bootstrap` каждую минуту | Клод крашится сразу после запуска | Смотри `docs/07-troubleshooting.md`; временно: `sudo -u <u> settings.json` без `hooks` |
+
+## Что делать НЕ надо
+
+- Не давай юзеру пароль — все действия через `sudo -u`.
+- Не давай полный sudo (root). Только узкие sudoers-правила (см. Шаг 2 ниже).
+- Не редактируй `/root/claude-tg-watchdog.sh` вручную. Меняй `scripts/claude-tg-watchdog.sh` в репе, потом `add-second-user.sh` (или `install.sh`) сам скопирует.
+- Не коммить `.env` (боевой токен), `.credentials.json`, `access.json` в git.
+
+---
+
+# Детальный режим (fallback, если что-то делается вручную)
+
+Если хочется пройтись по шагам без автоскрипта — вот они.
+
+## Глоссарий
+
+В примерах ниже используется placeholder `<USER>`. Замени на реальное имя (например, `ilshat`, `colleague`).
 
 ## Что общее на VPS
 
 - Бинари: Docker, Bun, Claude CLI (`/usr/bin/claude`) ставятся глобально один раз.
 - Whisper-контейнер один (`127.0.0.1:9000`).
-- Watchdog один (`/root/claude-tg-watchdog.sh`) запускается из root-cron, умеет управлять tmux любого юзера через `sudo -u`.
-
-## Глоссарий
-
-В примерах ниже используется placeholder `<USER>`. Замени на реальное имя нового юзера (например, `rafka`, `colleague`).
-
----
+- Watchdog один (`/root/claude-tg-watchdog.sh`), запускается из root-cron, умеет управлять tmux любого юзера через `sudo -u`.
 
 ## Шаг 1. Создать Linux-юзера
 
 ```bash
 sudo useradd -m -s /bin/bash <USER>
-sudo passwd -l <USER>           # пароль заблокирован
-sudo usermod -aG docker <USER>  # доступ к Docker без sudo
-id <USER>                        # проверка
+sudo passwd -l <USER>        # заблокировать пароль — все действия через sudo -u
 ```
-
-`passwd -l` блокирует логин по паролю. Если новый юзер не должен заходить по SSH — этого достаточно. Если нужен SSH — добавь его публичный ключ в `/home/<USER>/.ssh/authorized_keys`.
 
 ## Шаг 2. Узкие sudo-разрешения
 
 Только то, что реально нужно. **Не давай полный sudo.**
 
 ### Nginx (полный контроль над сервисом)
-
-```bash
-sudo tee /etc/sudoers.d/<USER>-nginx > /dev/null <<'EOF'
-<USER> ALL=(root) NOPASSWD: /usr/sbin/nginx, /bin/systemctl reload nginx, /bin/systemctl restart nginx, /bin/systemctl start nginx, /bin/systemctl stop nginx, /bin/systemctl status nginx, /usr/bin/tee /etc/nginx/*
-EOF
-sudo chmod 440 /etc/sudoers.d/<USER>-nginx
-sudo visudo -c -f /etc/sudoers.d/<USER>-nginx   # должно быть "parsed OK"
+```
+<USER> ALL=(root) NOPASSWD: /bin/systemctl reload nginx, /bin/systemctl restart nginx, /usr/sbin/nginx -t
 ```
 
 ### apt-get (юзер сам ставит пакеты)
-
-```bash
-sudo tee /etc/sudoers.d/<USER>-apt > /dev/null <<'EOF'
-<USER> ALL=(root) NOPASSWD: /usr/bin/apt, /usr/bin/apt-get, /usr/bin/dpkg
-EOF
-sudo chmod 440 /etc/sudoers.d/<USER>-apt
-sudo visudo -c -f /etc/sudoers.d/<USER>-apt
+```
+<USER> ALL=(root) NOPASSWD: /usr/bin/apt-get install *, /usr/bin/apt-get update
 ```
 
-### Web-deploy (если юзер будет публиковать сайты под /var/www через nginx)
-
-Опциональный набор. Даёт сужённое NOPASSWD-право на стандартные операции деплоя:
-cp/mkdir/chown/chmod/rm в /var/www/, ln в /etc/nginx/sites-enabled/, certbot.
-
-```bash
-sudo tee /etc/sudoers.d/<USER>-webdeploy > /dev/null <<'EOF'
-<USER> ALL=(root) NOPASSWD: /bin/cp /tmp/* /var/www/*, /bin/cp -r /tmp/* /var/www/*, /bin/cp /tmp/* /var/www/*/*, /bin/mkdir -p /var/www/*, /bin/chown -R <USER>\:<USER> /var/www/*, /bin/chmod -R 755 /var/www/*, /bin/chmod 755 /var/www/*, /bin/rm -rf /var/www/*, /bin/ln -sf /etc/nginx/sites-available/* /etc/nginx/sites-enabled/*, /bin/rm /etc/nginx/sites-enabled/*, /usr/bin/certbot *, /usr/bin/tee /var/www/*
-EOF
-sudo chmod 440 /etc/sudoers.d/<USER>-webdeploy
-sudo visudo -c -f /etc/sudoers.d/<USER>-webdeploy
+### Web-deploy (если юзер публикует сайты под `/var/www` через nginx)
 ```
+Cmnd_Alias WEBDEPLOY_<USER> = \
+    /bin/mkdir -p /var/www/*, \
+    /bin/cp -r * /var/www/*, \
+    /bin/rm -rf /var/www/<USER>/*, \
+    /bin/chown -R www-data\:www-data /var/www/*
 
-⚠️ **Не давать NOPASSWD на голые `/bin/cp`, `/bin/rm`, `/bin/chown` без path-restriction.** Это эквивалент полного root: можно подменить `/etc/sudoers`, `/etc/passwd`, удалить системные файлы. Узкие пути выше (`/tmp/*` → `/var/www/*`) безопасны.
+<USER> ALL=(root) NOPASSWD: WEBDEPLOY_<USER>
+```
++ добавь соответствующие `Bash(sudo cp ...)` в `settings.json > permissions.allow` юзера.
 
 ### Если нужны другие команды
+Добавляй по одной, всегда с полным путём (`/usr/bin/...`) и с ограниченным аргументами через `*`.
 
-Заведи отдельный файл `/etc/sudoers.d/<USER>-<имя>` с минимальным набором.
+## Шаг 3. Скелет `.claude/`
 
-## Шаг 3. Скелет .claude/
+Ровно тот же скелет, что делает `add-second-user.sh` (см. секцию Быстрый старт для полного файла). Ключевые файлы:
 
-```bash
-sudo -u <USER> mkdir -p \
-  /home/<USER>/.claude/channels/telegram/inbox \
-  /home/<USER>/.claude/scripts \
-  /home/<USER>/.claude/projects \
-  /home/<USER>/.claude/plugins/{cache,marketplaces,data}
-
-# settings.json (модельные настройки, hooks, разрешения)
-sudo cp /root/.claude/settings.json /home/<USER>/.claude/settings.json
-# Подсказка: если хочешь расширенный allow для web-deploy (sudo cp/mv/rm/chown,
-# docker, certbot, etc) — см. блок «Bash allow для web-deploy» ниже.
-
-# Whisper скрипт (для голосовых сообщений)
-sudo cp /root/.claude/scripts/whisper_via_api.sh /home/<USER>/.claude/scripts/whisper_via_api.sh
-
-# CLAUDE.md (правила взаимодействия — потом юзер сам подправит под себя)
-sudo cp /root/CLAUDE.md /home/<USER>/CLAUDE.md
-
-# Сделать всё owned by <USER>
-sudo chown -R <USER>:<USER> /home/<USER>/.claude /home/<USER>/CLAUDE.md
-sudo chmod 755 /home/<USER>/.claude/scripts/whisper_via_api.sh
-```
+- `~/.claude/settings.json` — auto mode, telegram plugin, Stop hook.
+- `~/.claude/hooks/stop-autoreply.py` — из репо `hooks/stop-autoreply.py`.
+- `~/.claude/scripts/send_tg.sh` — из репо `scripts/send_tg.sh` (**обязательно**! иначе stop-hook не отправит fallback-сообщения).
+  - После копирования нужно поправить hardcoded путь `.env` в `send_tg.sh`:
+    ```bash
+    sudo sed -i "s|/root/.claude/channels/telegram/.env|/home/<USER>/.claude/channels/telegram/.env|" /home/<USER>/.claude/scripts/send_tg.sh
+    ```
+- `~/.claude/channels/telegram/.env` (chmod 600) — `TELEGRAM_BOT_TOKEN=...`.
+- `~/.claude/channels/telegram/access.json` — `dmPolicy: allowlist, allowFrom: [<owner_id>, <extras>...]`.
+- `~/.claude.json` — `{"hasCompletedOnboarding": true, "bypassPermissionsModeAccepted": true}`.
 
 ## Шаг 4. Telegram-бот
 
-1. В Telegram открой `@BotFather`, команда `/newbot`, придумай имя и username (например, `<user>_claude_bot`).
-2. Сохрани выданный токен.
-3. Запиши токен в `.env` нового юзера:
-
-```bash
-sudo -u <USER> tee /home/<USER>/.claude/channels/telegram/.env > /dev/null <<EOF
-TELEGRAM_BOT_TOKEN=<вставь-токен>
-EOF
-sudo chmod 600 /home/<USER>/.claude/channels/telegram/.env
-sudo chown <USER>:<USER> /home/<USER>/.claude/channels/telegram/.env
-```
-
-4. Allowlist (кто может писать боту). На старте — только владелец, потом добавишь остальных:
-
-```bash
-sudo -u <USER> tee /home/<USER>/.claude/channels/telegram/access.json > /dev/null <<'EOF'
-{
-  "dmPolicy": "allowlist",
-  "allowFrom": ["<твой-telegram-user-id>"],
-  "groups": {}
-}
-EOF
-```
-
-`<твой-telegram-user-id>` узнаёшь у `@userinfobot` в Telegram. Это числовой ID, не username.
+Уже описано в «Быстром старте». Токен в `.env`, allowlist в `access.json`.
 
 ## Шаг 5. Установить telegram-плагин
 
-Сначала пробуем штатно:
-
-```bash
-sudo -u <USER> claude plugin marketplace add anthropics/claude-plugins-official
-sudo -u <USER> claude plugin install telegram@claude-plugins-official
-```
-
-Если падает с `Failed to clone marketplace repository` (например, нет SSH-ключа на github для нового юзера, или сетевая просадка) — копируем из существующего юзера:
-
-```bash
-# Скопировать кеш и marketplace из root
-sudo cp -r /root/.claude/plugins/marketplaces/claude-plugins-official \
-        /home/<USER>/.claude/plugins/marketplaces/
-sudo cp -r /root/.claude/plugins/cache/claude-plugins-official \
-        /home/<USER>/.claude/plugins/cache/
-sudo chown -R <USER>:<USER> /home/<USER>/.claude/plugins
-```
-
-Затем создать метаданные плагина (поправить путь под нового юзера и текущую версию плагина):
-
-```bash
-sudo -u <USER> tee /home/<USER>/.claude/plugins/installed_plugins.json > /dev/null <<'EOF'
-{
-  "version": 2,
-  "plugins": {
-    "telegram@claude-plugins-official": [
-      {
-        "scope": "user",
-        "installPath": "/home/<USER>/.claude/plugins/cache/claude-plugins-official/telegram/0.0.6",
-        "version": "0.0.6",
-        "installedAt": "2026-04-29T00:00:00.000Z",
-        "lastUpdated": "2026-04-29T00:00:00.000Z"
-      }
-    ]
-  }
-}
-EOF
-
-sudo -u <USER> tee /home/<USER>/.claude/plugins/known_marketplaces.json > /dev/null <<'EOF'
-{
-  "claude-plugins-official": {
-    "source": {
-      "source": "github",
-      "repo": "anthropics/claude-plugins-official"
-    },
-    "installLocation": "/home/<USER>/.claude/plugins/marketplaces/claude-plugins-official",
-    "lastUpdated": "2026-04-29T00:00:00.000Z"
-  }
-}
-EOF
-```
-
-Версию плагина (`0.0.6` в примере) сверь с тем, что лежит в `/root/.claude/plugins/cache/claude-plugins-official/telegram/`.
+Плагин ставится **автоматически** при первом запуске Claude, когда `settings.json > enabledPlugins > telegram@claude-plugins-official = true` и есть `extraKnownMarketplaces > claude-plugins-official > source > github`. Это уже в шаблоне.
 
 ## Шаг 6. Авторизовать Claude (OAuth headless)
 
-⚠️ `claude auth login --claudeai` **не работает** на безголовом сервере — он использует локальный HTTP-callback, который браузер пользователя не достанет.
+Работает **через auth-bot** — не запускай `claude /login` руками:
 
-**Правильный способ — bare `claude` wizard:**
+1. В Telegram напиши auth-bot: `/login <USER>` → пришлёт OAuth URL.
+2. Открой URL, войди в свой Claude Max/Pro, скопируй код.
+3. Пришли код обратно auth-bot — он вставит в pane и дождётся `Login successful`.
 
+Если auth-bot почему-то недоступен (например его сервис в даун):
 ```bash
-sudo -u <USER> tmux new-session -d -s <USER>-auth -x 220 -y 60 'claude'
-sleep 3
+# запускаем клод под юзером в tmux, отправляем /login, вытаскиваем URL:
+sudo -u <USER> tmux new-session -d -s claude-tg-<USER> "claude --dangerously-skip-permissions"
+sleep 45
+sudo -u <USER> tmux send-keys -t claude-tg-<USER> "/login" Enter
+sleep 8
+sudo -u <USER> tmux send-keys -t claude-tg-<USER> Enter   # выбор варианта 1
+sleep 6
+sudo -u <USER> tmux capture-pane -t claude-tg-<USER> -p -S -200 | grep -A2 "Browser didn't open"
+# скопируй URL (склеив разбитые строки), пройди OAuth в браузере, получи код
+sudo -u <USER> tmux send-keys -t claude-tg-<USER> "<CODE>" Enter
 ```
-
-Wizard покажет:
-1. Theme selection (Dark mode по умолчанию) — нажми Enter.
-2. Login method — выбери `1. Claude account with subscription` (Enter).
-3. Покажет URL `https://claude.com/cai/oauth/authorize?...` — скопируй его.
-
-```bash
-# Извлечь URL из tmux pane
-sudo -u <USER> tmux capture-pane -t <USER>-auth -p -S - | tr -d '\n' | grep -oE 'https://claude.com/cai/oauth[^ ]+' | head -1
-```
-
-4. Открой URL в браузере (там, где залогинен в Claude под нужным аккаунтом).
-5. Подтверди доступ → страница покажет код вида `xxx#yyy`.
-6. Вставь код в tmux:
-
-```bash
-sudo -u <USER> tmux send-keys -t <USER>-auth "вставь-полный-код" Enter
-sleep 2
-sudo -u <USER> tmux send-keys -t <USER>-auth Enter   # подтверждение
-sleep 5
-```
-
-7. Проверь:
-
-```bash
-sudo -u <USER> claude auth status
-# должно вернуть:
-# { "loggedIn": true, "authMethod": "claude.ai", ... }
-```
-
-8. Закрой auth-сессию:
-
-```bash
-sudo -u <USER> tmux kill-session -t <USER>-auth
-```
-
-⚠️ **Важно**: PKCE привязан к процессу. Если ты убьёшь tmux до того, как пользователь вставит код, нужно будет начать заново — старая ссылка станет невалидной.
 
 ## Шаг 7. Отметить onboarding выполненным
 
-После auth, в `~/<USER>/.claude.json` поле `hasCompletedOnboarding` остаётся `null`. Если этого не сделать — wizard будет показываться при каждом запуске Claude и watchdog будет крутить рестарты в цикле.
-
-```bash
-sudo -u <USER> jq '.hasCompletedOnboarding = true | .lastOnboardingVersion = "2.1.123"' \
-  /home/<USER>/.claude.json > /tmp/<USER>-claude.json && \
-sudo -u <USER> cp /tmp/<USER>-claude.json /home/<USER>/.claude.json && \
-sudo -u <USER> chmod 600 /home/<USER>/.claude.json && \
-rm /tmp/<USER>-claude.json
-```
-
-Версию (`2.1.123`) подставь актуальную:
-
-```bash
-claude --version
-```
+Уже в `.claude.json` — `add-second-user.sh` делает.
 
 ## Шаг 8. Добавить в watchdog
 
-Открой `/root/claude-tg-watchdog.sh`, найди массив `SESSIONS`, добавь строку:
-
-```bash
+`add-second-user.sh` делает автоматом. Вручную — открой `/root/projects/claude-vps-starter/scripts/claude-tg-watchdog.sh`, найди массив `SESSIONS`, добавь строку:
+```
 SESSIONS=(
-  "claude-tg|root|/root"
-  "claude-tg-wife|wife|/home/wife"
-  "claude-tg-<USER>|<USER>|/home/<USER>"   # ← новая запись
+  "claude-tg|root|/root|<uuid>"
+  ...
+  "claude-tg-<USER>|<USER>|/home/<USER>|<new-uuid>"   # ← новая
 )
 ```
-
-Watchdog работает по cron каждую минуту — подхватит новый сессию автоматически.
+и скопируй в `/root/claude-tg-watchdog.sh`.
 
 ## Шаг 9. Проверить
 
-```bash
-sudo tail -20 /var/log/claude-tg-watchdog.log
-sudo -u <USER> tmux list-sessions     # должна быть "claude-tg-<USER>"
-ps -u <USER> -o pid,cmd | grep -E 'claude|bun'
-```
+Список проверок — см. «Проверки» в «Быстром старте» выше.
 
-Через 1–2 минуты:
-- В tmux pane должен быть TUI Claude в auto-mode.
-- bun MCP server.ts должен крутиться.
-- Бот в Telegram отвечает на `/start` от тебя (ты в allowlist).
+### ВАЖНО: bun запущен с heartbeat-preload
 
-⚠️ Первые 1–3 минуты watchdog может писать `bun MCP gone 30s → restart` — это норма, bun стартует ~30–40с. Если через 3 минуты не стабилизировалось — подними порог `bun MCP gone Xs` в watchdog.
-
-### ВАЖНО: проверить что bun запущен с heartbeat-preload
-
-Pattern 7 watchdog требует, чтобы bun запускался с `--preload /usr/local/share/telegram-mcp-heartbeat.ts`. Без этого heartbeat-файл не создаётся, и watchdog слеп к зависшему bun (см. `docs/04-watchdog.md`, секцию 9). У старых инстансов, где `claude plugin install` выполнялся в уже-запущенной сессии (или плагин ставили вручную через `bun.real run --cwd ...marketplaces/...`), bun стартует со старой команды и сидит «зомби» неделями.
-
-Проверь:
+Pattern 7 watchdog требует, чтобы bun запускался с `--preload /usr/local/share/telegram-mcp-heartbeat.ts`. Иначе heartbeat-файл не создаётся и watchdog слеп к зависшему bun.
 
 ```bash
-# 1. в cmdline должен быть --preload
-ps -eo user,cmd | grep <USER> | grep bun.real
-
-# 2. heartbeat-файл должен быть и тикать (<30s):
-stat -c '%y' /home/<USER>/.claude/channels/telegram/bot.heartbeat
+ps -eo user,cmd | grep <USER> | grep bun.real                  # должен быть --preload
+stat -c '%y' /home/<USER>/.claude/channels/telegram/bot.heartbeat   # < 30 сек
 ```
 
-Если в cmdline `--preload telegram-mcp-heartbeat.ts` **нет** или файла heartbeat нет вовсе → bun стартанул со старой команды. Лечение:
-
-```bash
-sudo pkill -9 -u <USER> -f bun.real
-# claude main подхватит за ~30-60с — новый bun стартует уже с --preload
-# контекст диалога не страдает (главный claude процесс не трогаем)
-```
-
-Через минуту повторно проверь — heartbeat должен появиться и тикать.
+Если `--preload` **нет**: `sudo pkill -9 -u <USER> -f bun.real` — при рестарте bun подхватит новую команду.
 
 ## Шаг 10. Bash allow для web-deploy (опционально)
 
-Если новый юзер должен публиковать сайты под /var/www через nginx + ставить SSL — нужно добавить два набора:
-
 ### a) Расширить sudoers (см. Шаг 2 → блок «Web-deploy»)
 
-### b) Расширить bash-allow в settings.json юзера
-
-⚠️ **КРИТИЧНО:** Эти патерны должен добавить САМ ЮЗЕР в свой собственный `/home/<USER>/.claude/settings.json` — либо вручную через `sudo -u <USER>`, либо с помощью своей собственной Claude-сессии. Из ROOT-сессии редактировать чужой `settings.json` Claude-сэндбокс блокирует как «cross-user agent config edit / memory poisoning». Это правильное поведение, не баг.
-
-Рабочий способ — выполни в SSH под root:
-
-```bash
-sudo -u <USER> jq '.permissions.allow += [
-  "Bash(sudo cp:*)",
-  "Bash(sudo mv:*)",
-  "Bash(sudo mkdir:*)",
-  "Bash(sudo chown:*)",
-  "Bash(sudo chmod:*)",
-  "Bash(sudo rm:*)",
-  "Bash(sudo tee:*)",
-  "Bash(sudo nginx:*)",
-  "Bash(sudo systemctl reload nginx)",
-  "Bash(sudo systemctl restart nginx)",
-  "Bash(sudo systemctl status nginx)",
-  "Bash(sudo nginx -t)",
-  "Bash(sudo nginx -s reload)",
-  "Bash(sudo ln -s:*)",
-  "Bash(sudo ln -sf:*)",
-  "Bash(sudo certbot:*)",
-  "Bash(docker run:*)",
-  "Bash(docker stop:*)",
-  "Bash(docker rm:*)",
-  "Bash(docker start:*)",
-  "Bash(docker restart:*)",
-  "Bash(docker logs:*)",
-  "Bash(docker ps:*)",
-  "Bash(docker exec:*)",
-  "Bash(docker compose:*)",
-  "Bash(docker-compose:*)",
-  "Bash(docker pull:*)",
-  "Bash(docker build:*)",
-  "Bash(docker network:*)",
-  "Bash(docker volume:*)",
-  "Bash(docker inspect:*)",
-  "Bash(curl -F:*)",
-  "Bash(curl --form:*)"
-]' /home/<USER>/.claude/settings.json > /tmp/<USER>-settings.json && \
-sudo -u <USER> cp /tmp/<USER>-settings.json /home/<USER>/.claude/settings.json && \
-rm /tmp/<USER>-settings.json
-```
-
-После этого юзер сможет без sandbox-блока:
-- `sudo cp/mkdir/...` — в /var/www через узкие sudoers-правила (Шаг 2)
-- `docker run/exec/...` — через группу docker
-- `curl -F` — для аплоадов через мульти-парт форм
-- Перезагружать nginx, делать SSL через certbot
-
-### Что важно понимать
-
-Список выше — это де-факто полный root для агента. Применяй ТОЛЬКО когда юзер:
-- доверенный (сам владелец, не сторонний человек)
-- работает с веб-деплоем
-- не запускает untrusted-код (т.к. через docker run возможен escape)
-
-Для bot-юзера который только в Telegram отвечает (как wife) — НЕ применять.
-
-## Шаг 11. Добавить других людей в allowlist
-
-Для каждого нового пользователя бота:
-
-1. Узнай его Telegram user ID (через `@userinfobot`).
-2. Добавь в `/home/<USER>/.claude/channels/telegram/access.json`:
-
+### b) Расширить bash-allow в `settings.json` юзера
 ```json
 {
-  "dmPolicy": "allowlist",
-  "allowFrom": ["<owner-id>", "<его-id>"],
-  "groups": {}
+  "permissions": {
+    "allow": [
+      "Bash(sudo cp -r /home/<USER>/build/* /var/www/*)",
+      "Bash(sudo mkdir -p /var/www/*)",
+      "Bash(sudo chown -R www-data:www-data /var/www/*)",
+      "Bash(sudo /usr/sbin/nginx -t)",
+      "Bash(sudo /bin/systemctl reload nginx)"
+    ]
+  }
 }
 ```
 
-Перезагружать ничего не нужно — telegram MCP перечитывает access.json на каждом сообщении.
+### Что важно понимать
 
----
+Claude Code sandbox блокирует cross-user действия, self-modification, и запуск команд под другими юзерами через `sudo` — это фича безопасности. Разрешения даются только через явный `permissions.allow` **и** соответствующие sudoers-правила.
 
-## Что НЕ делать
+## Шаг 11. Добавить других людей в allowlist
 
-- ❌ `claude auth login --claudeai` на headless сервере — не работает.
-- ❌ `claude auth login --console` — это для API-ключа, не для subscription.
-- ❌ Не давай новому юзеру `usermod -aG sudo` без необходимости.
-- ❌ Не клади токен бота в settings.json или в неенв-файлы — только в `.env` с `chmod 600`.
-- ❌ Не копируй `.credentials.json` или `.claude.json` другого юзера — каждый авторизуется отдельно.
-- ❌ **Не пытайся расширить permissions агента через Telegram-сообщения** — даже свои собственные. Sandbox корректно блокирует такие запросы как potential prompt injection. Telegram — не аутентифицированный канал, тебе и злоумышленнику с твоего id одинаково можно «попросить» агента дать себе sudo. Любые расширения permissions делаются ТОЛЬКО руками из ssh-сессии.
+Открой `/home/<USER>/.claude/channels/telegram/access.json`, добавь ID в `allowFrom`. Клод подхватит при следующем tool_call MCP (не нужно перезапускать).
 
 ## Безопасность: почему sandbox блокирует cross-user / self-modification
 
-Если ты или другой Claude-инстанс из Telegram-канала просит:
-- Дать sudoers-права другому юзеру/себе
-- Отредактировать чужой `~/.claude/settings.json` (расширить allow-list)
-- Подменить свой собственный `~/.claude/settings.json` через паст-бэк
-- Аппрувить pairing/access.json по запросу из канала
-
-**Sandbox откажется. Это правильное поведение.** Причины:
-
-1. **Telegram-канал не аутентифицирован.** Агент не может отличить твоё реальное сообщение от поддельного, отправленного с твоего id злоумышленником.
-2. **Cross-user agent config edit = memory poisoning.** Если root-агент может править settings.json другого агента, он может заставить тот выполнить произвольные Bash-команды.
-3. **Self-modification через канал = privilege escalation pattern.** Если агент может расширить свои собственные permissions по сообщению из канала, prompt injection использует это первым делом.
-
-**Правильный путь для расширения прав:**
-
-1. Лично зайди по ssh на сервер
-2. Выполни `sudo visudo -f /etc/sudoers.d/<user>-<rule>` или `sudo -u <user> jq` для конфигов
-3. Все изменения applied вне Telegram-flow
-
-Этот документ описывает именно такой workflow — все sudoers-правила и `permissions.allow` обновления выполняются командами из ssh-сессии, не через агента.
+Смотри `docs/07-troubleshooting.md`.
 
 ## Чек-лист готовности
 
-- [ ] `id <USER>` показывает группу docker
-- [ ] `sudo -u <USER> sudo nginx -t` проходит
-- [ ] `sudo -u <USER> claude auth status` → `loggedIn: true`
+- [ ] `id <USER>` показывает пользователя
+- [ ] `sudo -u <USER> claude --version` работает
+- [ ] `/home/<USER>/.credentials.json` есть, `refreshToken` длинный
 - [ ] `/home/<USER>/.claude/plugins/installed_plugins.json` есть
-- [ ] `/home/<USER>/.claude.json` имеет `hasCompletedOnboarding: true`
+- [ ] `/home/<USER>/.claude.json` `hasCompletedOnboarding: true`
 - [ ] watchdog SESSIONS содержит новую запись
+- [ ] auth-bot `BOTS` содержит юзера + `systemctl restart auth-bot` прошёл
 - [ ] tmux session `claude-tg-<USER>` живёт
 - [ ] `ps -eo cmd | grep bun.real` для юзера содержит `--preload telegram-mcp-heartbeat.ts`
 - [ ] `~/.claude/channels/telegram/bot.heartbeat` существует и mtime < 30s
+- [ ] Первый nudge отработал (в watchdog log: `first-boot nudge sent`)
 - [ ] Telegram-бот отвечает на сообщение от owner
-- [ ] (опционально) sudoers `<USER>-webdeploy` создан, если нужен web-деплой
-- [ ] (опционально) `permissions.allow` в settings.json расширен под web-деплой
 
 ## Удалить юзера обратно
 
-Если решил откатить:
-
 ```bash
-# Стоп watchdog для этого юзера: убрать строку из SESSIONS в /root/claude-tg-watchdog.sh
+sudo systemctl stop auth-bot
+# 1. Kill tmux + processes
 sudo -u <USER> tmux kill-server 2>/dev/null
-sudo rm /etc/sudoers.d/<USER>-nginx /etc/sudoers.d/<USER>-apt /etc/sudoers.d/<USER>-webdeploy 2>/dev/null
+sudo pkill -9 -u <USER>
+# 2. Убрать из watchdog SESSIONS (и deployed) и auth-bot BOTS вручную
+sudo vim /root/projects/claude-vps-starter/scripts/claude-tg-watchdog.sh
+sudo vim /root/projects/claude-vps-starter/auth-bot/auth_bot.py
+sudo cp /root/projects/claude-vps-starter/scripts/claude-tg-watchdog.sh /root/claude-tg-watchdog.sh
+sudo cp /root/projects/claude-vps-starter/auth-bot/auth_bot.py /usr/local/bin/auth-bot.py
+# 3. Удалить юзера (и всю его домашку)
 sudo userdel -r <USER>
+sudo systemctl restart auth-bot
 ```
-
-`-r` удалит /home. Если хочешь сохранить файлы — без `-r`.
