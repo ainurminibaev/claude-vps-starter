@@ -57,6 +57,7 @@ restart_session() {
     JSONL="/root/.claude/projects/-root/$SESSION_ID.jsonl"
   fi
   local FLAG
+  local IS_BOOTSTRAP=0
   if [[ -n "$SESSION_ID" ]] && [[ -f "$JSONL" ]]; then
     FLAG="--resume $SESSION_ID"
   else
@@ -64,6 +65,7 @@ restart_session() {
     echo "$SESSION_ID" > "$UUID_FILE"
     FLAG="--session-id $SESSION_ID"
     echo "$(date -Iseconds) [$SESSION] bootstrap new session $SESSION_ID" >> "$LOG"
+    IS_BOOTSTRAP=1
   fi
 
   if [[ "$USER" == "root" ]]; then
@@ -78,6 +80,17 @@ restart_session() {
   $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
   sleep 3
   $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
+
+  # First-boot nudge: on brand-new sessions Claude sits in welcome screen
+  # until the first user prompt. Without a nudge, plugin:telegram never
+  # activates channel poll and incoming TG messages don't reach the pane.
+  if [[ "$IS_BOOTSTRAP" == "1" ]]; then
+    sleep 15
+    $TMUX_CMD send-keys -t "$SESSION" "$NUDGE_TEXT" 2>/dev/null
+    sleep 1
+    $TMUX_CMD send-keys -t "$SESSION" Enter 2>/dev/null
+    echo "$(date -Iseconds) [$SESSION] first-boot nudge sent" >> "$LOG"
+  fi
 }
 
 send_nudge() {
