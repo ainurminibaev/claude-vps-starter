@@ -126,6 +126,14 @@ cp "$REPO_DIR/hooks/stop-autoreply.py" "$HOME_DIR/.claude/hooks/"
 chmod +x "$HOME_DIR/.claude/hooks/stop-autoreply.py"
 cp "$REPO_DIR/scripts/send_tg.sh" "$HOME_DIR/.claude/scripts/"
 chmod +x "$HOME_DIR/.claude/scripts/send_tg.sh"
+# whisper helper (voice message transcription)
+if [ -f "$REPO_DIR/scripts/whisper_via_api.sh" ]; then
+  cp "$REPO_DIR/scripts/whisper_via_api.sh" "$HOME_DIR/.claude/scripts/"
+  chmod +x "$HOME_DIR/.claude/scripts/whisper_via_api.sh"
+elif [ -f /root/.claude/scripts/whisper_via_api.sh ]; then
+  cp /root/.claude/scripts/whisper_via_api.sh "$HOME_DIR/.claude/scripts/"
+  chmod +x "$HOME_DIR/.claude/scripts/whisper_via_api.sh"
+fi
 
 # send_tg.sh has a hardcoded /root/.claude/... .env path; rewrite for this user
 sed -i "s|\. /root/\.claude/channels/telegram/\.env|. $HOME_DIR/.claude/channels/telegram/.env|" \
@@ -151,7 +159,26 @@ if [ ! -f "$HOME_DIR/.claude.json" ]; then
 EOF
 fi
 
-chown -R "$USER:$USER" "$HOME_DIR/.claude" "$HOME_DIR/.claude.json"
+# Bootstrap CLAUDE.md — minimal role prompt so the bot has something to load
+if [ ! -f "$HOME_DIR/CLAUDE.md" ]; then
+  tee "$HOME_DIR/CLAUDE.md" > /dev/null <<CMD
+# $USER — правила для бота
+
+## Кто ты
+Личный AI-ассистент. Отвечаешь владельцу в Telegram.
+
+## Обработка входящих
+- Текст → отвечай прямо через plugin:telegram:reply.
+- Голосовое (voice/audio из channels/telegram/inbox/*.oga) → транскрибируй через ~/.claude/scripts/whisper_via_api.sh <path>, потом ответь по содержанию.
+- Долгие задачи — уточни в TG что делаешь.
+
+## Тон
+- Мягкий, деловой, по-русски.
+- Короткие сообщения в стиле TG.
+CMD
+fi
+
+chown -R "$USER:$USER" "$HOME_DIR/.claude" "$HOME_DIR/.claude.json" "$HOME_DIR/CLAUDE.md"
 echo "[+] .claude/ skeleton ready (settings, hooks, scripts, telegram env+access, .claude.json)"
 
 # --- 3. Watchdog SESSIONS ---
