@@ -164,7 +164,7 @@ for entry in "${SESSIONS[@]}"; do
 
   # Pattern 1: rate-limit dialog (stuck >5 min → restart)
   STUCK_FILE="$STATE_DIR/$SESSION-ratelimit-stuck"
-  if echo "$pane" | grep -qE "hit your limit|rate.?limit.?options|Stop and wait for limit"; then
+  if echo "$pane" | grep -qE "You've hit your.*usage limit|rate.?limit.?options|Stop and wait for limit"; then
     stuck_count=$(cat "$STUCK_FILE" 2>/dev/null || echo 0)
     stuck_count=$((stuck_count + 1))
     echo "$stuck_count" > "$STUCK_FILE"
