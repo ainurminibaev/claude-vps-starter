@@ -139,31 +139,52 @@ def get_expires_h(bot_name):
 
 
 def start_login_and_get_url(bot_name):
-    """Запускает /login в pane бота, возвращает URL или None. Fail-fast при tmux-ошибке."""
-    for step, args in (
-        ("esc1", ("Escape",)),
-        ("esc2", ("Escape",)),
-        ("login_text", ("-l", "/login")),
-        ("login_enter", ("Enter",)),
-        ("opt1", ("Enter",)),
-    ):
-        r = send_keys(bot_name, *args)
-        if r.returncode != 0:
-            log(f"{bot_name}: start_login step={step} tmux fail rc={r.returncode} err={r.stderr!r}")
+    """Запускает /login в pane бота, возвращает URL или None.
+    3 попытки: если pane в /compact или error-состоянии, длинная серия Escape
+    вытесняет модалки; более длинные sleep'ы дают клоду времени показать URL."""
+    for attempt in range(3):
+        # 5 Escape подряд, чтобы вытеснить любую активную модалку (compact, error, /login modal старый)
+        broken = False
+        for _ in range(5):
+            r = send_keys(bot_name, "Escape")
+            if r.returncode != 0:
+                log(f"{bot_name}: send Escape tmux fail rc={r.returncode} — bail")
+                broken = True
+                break
+            time.sleep(0.5)
+        if broken:
             return None
-        # тайминги как раньше
-        if step in ("esc1", "esc2"):
-            time.sleep(1)
-        elif step == "login_text":
-            time.sleep(0.3)
-        elif step == "login_enter":
-            time.sleep(3)
-        elif step == "opt1":
-            time.sleep(5)
-    pane = capture_pane(bot_name, 50).replace("\n", "")
-    m = re.search(r"https://claude\.com/cai/oauth/authorize\?[^\s]+", pane)
-    return m.group(0) if m else None
-
+        time.sleep(1)
+        # набираем /login (literal, чтобы не менялся раскладкой)
+        r = send_keys(bot_name, "-l", "/login")
+        if r.returncode != 0:
+            log(f"{bot_name}: send /login tmux fail rc={r.returncode}")
+            return None
+        time.sleep(0.5)
+        r = send_keys(bot_name, "Enter")
+        if r.returncode != 0:
+            return None
+        # /login модалка должна открыться (может занять до 6с при загрузке)
+        time.sleep(6)
+        # выбираем вариант 1 (Claude subscription)
+        r = send_keys(bot_name, "Enter")
+        if r.returncode != 0:
+            return None
+        # первая попытка — 10с, дальше 15с (пусть pane точно нарисует URL)
+        time.sleep(10 if attempt == 0 else 15)
+        # захват pane и парсинг URL с учётом переносов в рамке TUI
+        pane_raw = capture_pane(bot_name, 100)
+        pane = pane_raw.replace("\n", "").replace(" ", "").replace("│", "").replace("╭", "").replace("╰", "").replace("─", "")
+        m = re.search(r"https://claude\.com/cai/oauth/authorize\?[A-Za-z0-9%+/&_=?.-]+", pane)
+        if m:
+            url = m.group(0)
+            # обрезаем возможный UI-хвост после state= (43 base64url chars)
+            m2 = re.match(r"(.+?state=[A-Za-z0-9_-]{43})", url)
+            return m2.group(1) if m2 else url
+        log(f"{bot_name}: URL not found on attempt {attempt+1}/3, retrying")
+        time.sleep(2)
+    log(f"{bot_name}: URL not found after 3 attempts")
+    return None
 
 def submit_code(bot_name, code):
     """Вставляет код в pane бота. True если Login successful."""
