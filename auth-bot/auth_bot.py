@@ -83,14 +83,31 @@ def send(chat_id, text):
     return r
 
 
+class _TmuxFail:
+    """Мок-результат tmux при таймауте/ошибке — интерфейс совместим с subprocess.CompletedProcess."""
+    def __init__(self, reason):
+        self.returncode = -1
+        self.stdout = ""
+        self.stderr = reason
+
+
 def tmux(bot_name, *args):
     """
-    Обёртка над tmux. Для root — прямой вызов, для остальных — через sudo -u <user>
-    (потому что tmux-сервер у каждого пользователя свой).
+    Обёртка над tmux. Для root — прямой вызов, для остальных — через sudo -u <user>.
+    ВАЖНО: любой TimeoutExpired/OSError глотается сюда и возвращается как _TmuxFail,
+    чтобы одна залипшая send-keys не роняла poll_loop и не приводила к сутками зависшему боту.
+    Вызывающий должен проверять r.returncode != 0.
     """
     user = BOTS[bot_name]["user"]
     cmd = ["tmux", *args] if user == "root" else ["sudo", "-u", user, "tmux", *args]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired as e:
+        log(f"tmux TIMEOUT bot={bot_name} args={args!r}")
+        return _TmuxFail(f"timeout: {e}")
+    except Exception as e:
+        log(f"tmux ERROR bot={bot_name} args={args!r}: {e}")
+        return _TmuxFail(f"error: {e}")
 
 
 def capture_pane(bot_name, lines=80):
@@ -122,17 +139,27 @@ def get_expires_h(bot_name):
 
 
 def start_login_and_get_url(bot_name):
-    """Запускает /login в pane бота, возвращает URL или None."""
-    send_keys(bot_name, "Escape")
-    time.sleep(1)
-    send_keys(bot_name, "Escape")
-    time.sleep(1)
-    send_keys(bot_name, "-l", "/login")
-    time.sleep(0.3)
-    send_keys(bot_name, "Enter")
-    time.sleep(3)
-    send_keys(bot_name, "Enter")  # опция 1
-    time.sleep(5)
+    """Запускает /login в pane бота, возвращает URL или None. Fail-fast при tmux-ошибке."""
+    for step, args in (
+        ("esc1", ("Escape",)),
+        ("esc2", ("Escape",)),
+        ("login_text", ("-l", "/login")),
+        ("login_enter", ("Enter",)),
+        ("opt1", ("Enter",)),
+    ):
+        r = send_keys(bot_name, *args)
+        if r.returncode != 0:
+            log(f"{bot_name}: start_login step={step} tmux fail rc={r.returncode} err={r.stderr!r}")
+            return None
+        # тайминги как раньше
+        if step in ("esc1", "esc2"):
+            time.sleep(1)
+        elif step == "login_text":
+            time.sleep(0.3)
+        elif step == "login_enter":
+            time.sleep(3)
+        elif step == "opt1":
+            time.sleep(5)
     pane = capture_pane(bot_name, 50).replace("\n", "")
     m = re.search(r"https://claude\.com/cai/oauth/authorize\?[^\s]+", pane)
     return m.group(0) if m else None
@@ -322,9 +349,14 @@ def poll_loop():
                     f.write(str(offset))
                 msg = u.get("message") or u.get("edited_message") or {}
                 if msg:
-                    handle_message(msg)
+                    # handle_message может висеть на tmux (до 15с × N вызовов).
+                    # Обрабатываем в отдельном daemon-thread, чтобы poll_loop продолжил
+                    # ловить новые сообщения и не пропускал их.
+                    threading.Thread(
+                        target=_safe_handle, args=(msg,), daemon=True
+                    ).start()
         except Exception as e:
-            log(f"poll error: {e}")
+            log(f"poll error: {e}\n{traceback.format_exc()}")
             time.sleep(5)
 
 
