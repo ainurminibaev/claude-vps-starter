@@ -325,6 +325,19 @@ def handle_message(msg):
 
 
 # --- poll loop ---
+def _safe_handle(msg):
+    """handle_message с глобальным try/except, чтобы падение не убивало thread молча."""
+    try:
+        handle_message(msg)
+    except Exception as e:
+        log(f"handle_message crashed: {e}\n{__import__('traceback').format_exc()}")
+        try:
+            send(OWNER_CHAT_ID, f"⚠️ auth-bot: handle_message crashed: {type(e).__name__}: {e}")
+        except Exception:
+            pass
+
+
+
 def poll_loop():
     log("poll loop started")
     offset_path = f"{STATE_DIR}/offset"
