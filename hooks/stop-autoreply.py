@@ -144,25 +144,25 @@ def main():
         log(f"no transcript: {transcript}")
         return
 
+    # Держим в памяти только последний ход (от последнего user-сообщения до
+    # конца) — transcript у долгих сессий бывает 200+ МБ, полный парс в список
+    # раздувал процесс до 500+ МБ и приводил к OOM.
     records = []
     with open(transcript, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
             try:
-                records.append(json.loads(line))
+                rec = json.loads(line)
             except Exception:
-                pass
+                continue
+            if rec.get("type") == "user":
+                records = [rec]
+            elif records:
+                records.append(rec)
     if not records:
-        return
-
-    trigger_idx = -1
-    for i in range(len(records) - 1, -1, -1):
-        if records[i].get("type") == "user":
-            trigger_idx = i
-            break
-    if trigger_idx < 0:
         log("no user-input found")
         return
 
+    trigger_idx = 0
     trig_msg = records[trigger_idx].get("message") or {}
     trig_content = trig_msg.get("content")
     if isinstance(trig_content, str):
