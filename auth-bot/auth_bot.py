@@ -244,6 +244,12 @@ def monitor_loop():
         try:
             now = time.time()
             for name in BOTS:
+                # у ботов на статичном setup-token (oauth-token-env) credentials.json
+                # не используется — мониторить его протухание бессмысленно
+                token_env = os.path.join(os.path.dirname(BOTS[name]["creds"]), "oauth-token-env")
+                if os.path.exists(token_env):
+                    last_alert[name] = 0
+                    continue
                 rl = get_refresh_len(name)
                 if rl > 30:
                     last_alert[name] = 0
