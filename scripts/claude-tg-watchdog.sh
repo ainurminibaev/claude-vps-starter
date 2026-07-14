@@ -70,11 +70,11 @@ restart_session() {
 
   if [[ "$USER" == "root" ]]; then
     tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-      "export PATH=/root/.bun/bin:\$PATH && export DISABLE_AUTOUPDATER=1 && cd $CWD && claude $FLAG --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+      "export PATH=/root/.bun/bin:\$PATH && export DISABLE_AUTOUPDATER=1 && { [ -f /root/.claude/oauth-token-env ] && . /root/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
     sleep 2
     tmux pipe-pane -t "$SESSION" -o "cat >> /var/log/claude-tg-pane.log"
   else
-    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && cd $CWD && claude $FLAG --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
+    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && { [ -f $HOME/.claude/oauth-token-env ] && . $HOME/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
   fi
   sleep 4
   $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
