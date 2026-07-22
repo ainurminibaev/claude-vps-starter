@@ -143,15 +143,22 @@ def start_login_and_get_url(bot_name):
     3 попытки: если pane в /compact или error-состоянии, длинная серия Escape
     вытесняет модалки; более длинные sleep'ы дают клоду времени показать URL."""
     for attempt in range(3):
-        # 5 Escape подряд, чтобы вытеснить любую активную модалку (compact, error, /login modal старый)
+        # Гасим модалки ТОЛЬКО если они реально видны в pane: слепая серия
+        # Escape на спокойном pane сама открывает rewind-диалог (двойной Esc =
+        # «jump to previous message»), и /login печатается внутрь него.
+        MODAL_MARKERS = ("Esc to cancel", "esc to cancel", "Enter to continue",
+                         "esc to interrupt", "Esc to exit", "esc to undo")
         broken = False
         for _ in range(5):
+            pane_now = capture_pane(bot_name, 25)
+            if not any(mk in pane_now for mk in MODAL_MARKERS):
+                break
             r = send_keys(bot_name, "Escape")
             if r.returncode != 0:
                 log(f"{bot_name}: send Escape tmux fail rc={r.returncode} — bail")
                 broken = True
                 break
-            time.sleep(0.5)
+            time.sleep(1)
         if broken:
             return None
         time.sleep(1)
