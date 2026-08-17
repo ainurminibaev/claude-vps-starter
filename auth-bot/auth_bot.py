@@ -42,6 +42,8 @@ BOTS = {
     "niyaz":   {"user": "niyaz",             "session": "claude-tg-niyaz",              "creds": "/home/niyaz/.claude/.credentials.json"},
     "diana":   {"user": "diana",             "session": "claude-tg-diana",              "creds": "/home/diana/.claude/.credentials.json"},
     "ilshat":  {"user": "ilshat",            "session": "claude-tg-ilshat",             "creds": "/home/ilshat/.claude/.credentials.json"},
+    "marusya":  {"user": "marusya",            "session": "claude-tg-marusya",             "creds": "/home/marusya/.claude/.credentials.json"},
+
 }
 
 os.makedirs(STATE_DIR, exist_ok=True)

@@ -28,7 +28,8 @@ SESSIONS=(
   "claude-tg-khazrat|khazrat|/home/khazrat"
   "claude-tg-niyaz|niyaz|/home/niyaz"
   "claude-tg-diana|diana|/home/diana"
-  "claude-tg-ilshat|ilshat|/home/ilshat|4c1bd9d6-13c2-442f-aa49-05593626bc16"
+  "claude-tg-ilshat|ilshat|/home/ilshat"
+  "claude-tg-marusya|marusya|/home/marusya/marusya"
 )
 
 # regex of indicators meaning Claude is currently in a turn (don't touch)
@@ -74,7 +75,7 @@ restart_session() {
     sleep 2
     tmux pipe-pane -t "$SESSION" -o "cat >> /var/log/claude-tg-pane.log"
   else
-    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && { [ -f $HOME/.claude/oauth-token-env ] && . $HOME/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official'"
+    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && { [ -f \$HOME/.claude/oauth-token-env ] && . \$HOME/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug-$USER.log'"
   fi
   sleep 4
   $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
