@@ -188,7 +188,7 @@ else
   SESSION_UUID=$(uuidgen)
   echo "[>] adding $SESSION_NAME to watchdog (uuid: $SESSION_UUID)"
   sed -i "/^SESSIONS=(/,/^)/ { /^)/ i\\
-  \"$SESSION_NAME|$USER|$HOME_DIR|$SESSION_UUID\"
+  \"$SESSION_NAME|$USER|$HOME_DIR\"
   }" "$WATCHDOG_REPO"
   cp "$WATCHDOG_REPO" "$WATCHDOG_DEPLOYED"
   chmod +x "$WATCHDOG_DEPLOYED"

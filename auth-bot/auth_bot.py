@@ -42,6 +42,8 @@ BOTS = {
     "user5":   {"user": "user5",             "session": "claude-tg-user5",              "creds": "/home/user5/.claude/.credentials.json"},
     "user9":   {"user": "user9",             "session": "claude-tg-user9",              "creds": "/home/user9/.claude/.credentials.json"},
     "user3":  {"user": "user3",            "session": "claude-tg-user3",             "creds": "/home/user3/.claude/.credentials.json"},
+    "projectbot":  {"user": "projectbot",            "session": "claude-tg-projectbot",             "creds": "/home/projectbot/.claude/.credentials.json"},
+
 }
 
 os.makedirs(STATE_DIR, exist_ok=True)
