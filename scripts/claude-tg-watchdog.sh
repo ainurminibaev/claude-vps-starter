@@ -53,10 +53,10 @@ restart_session() {
   SESSION_ID=$(cat "$UUID_FILE" 2>/dev/null)
   local PROJECT_KEY
   PROJECT_KEY=$(echo "$CWD" | sed 's|/|-|g')
-  local JSONL="$CWD/.claude/projects/$PROJECT_KEY/$SESSION_ID.jsonl"
-  if [[ "$USER" == "root" ]]; then
-    JSONL="/root/.claude/projects/-root/$SESSION_ID.jsonl"
-  fi
+  # jsonl всегда лежит в ДОМАШНЕЙ папке юзера, а не в CWD (они совпадают не у всех ботов)
+  local HOME_DIR
+  HOME_DIR=$(getent passwd "$USER" | cut -d: -f6)
+  local JSONL="$HOME_DIR/.claude/projects/$PROJECT_KEY/$SESSION_ID.jsonl"
   local FLAG
   local IS_BOOTSTRAP=0
   if [[ -n "$SESSION_ID" ]] && [[ -f "$JSONL" ]]; then
