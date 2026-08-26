@@ -11,7 +11,21 @@ import json, os, sys, re, subprocess, time
 
 HOME = os.path.expanduser("~")
 USER = os.environ.get("USER") or os.path.basename(HOME)
-LOG = f"/var/log/stop-autoreply-{USER}.log" if USER != "root" else "/var/log/stop-autoreply.log"
+_LOG_MAIN = f"/var/log/stop-autoreply-{USER}.log" if USER != "root" else "/var/log/stop-autoreply.log"
+_LOG_FALLBACK = f"{HOME}/.claude/stop-autoreply.log"
+
+
+def _pick_log():
+    """Служебный юзер не может СОЗДАТЬ файл в /var/log (root:syslog 755).
+    Если файла ещё нет — пишем в домашнюю папку, иначе логи молча терялись."""
+    try:
+        with open(_LOG_MAIN, "a"):
+            return _LOG_MAIN
+    except Exception:
+        return _LOG_FALLBACK
+
+
+LOG = _pick_log()
 MARKER_DIR = "/tmp/stop-autoreply-markers"
 ENV_FILE = f"{HOME}/.claude/channels/telegram/.env"
 TG_LIMIT = 3800
@@ -26,6 +40,21 @@ def log(msg):
     try:
         with open(LOG, "a") as f:
             f.write(f"[{time.strftime('%Y-%m-%dT%H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
+
+def cleanup_markers(max_age_days=7):
+    """Маркеры копятся в /tmp вечно — чистим старые."""
+    try:
+        cutoff = time.time() - max_age_days * 86400
+        for name in os.listdir(MARKER_DIR):
+            f = os.path.join(MARKER_DIR, name)
+            try:
+                if os.path.getmtime(f) < cutoff:
+                    os.remove(f)
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -201,7 +230,15 @@ def main():
         return
 
     os.makedirs(MARKER_DIR, exist_ok=True)
-    marker = f"{MARKER_DIR}/{USER}-{session_id}-{trigger_idx}.sent"
+    try:
+        os.chmod(MARKER_DIR, 0o1777)
+    except Exception:
+        pass
+    cleanup_markers()
+    # Ключ маркера — uuid хода, а не trigger_idx: тот всегда 0, поэтому маркер
+    # получался ОДИН на всю сессию и хук замолкал навсегда после первой отправки.
+    trig_uuid = records[trigger_idx].get("uuid") or f"idx{trigger_idx}"
+    marker = f"{MARKER_DIR}/{USER}-{session_id}-{trig_uuid}.sent"
     if os.path.exists(marker):
         log(f"marker exists, skipping: {marker}")
         return
