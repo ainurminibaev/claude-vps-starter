@@ -160,6 +160,39 @@ def send_message(token, chat_id, text):
         return {"ok": False, "raw": res.stdout[:200]}
 
 
+# Последний ход: от последнего user-сообщения до конца файла.
+def read_last_turn(transcript):
+    records = []
+    try:
+        with open(transcript, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if rec.get("type") == "user":
+                    records = [rec]
+                elif records:
+                    records.append(rec)
+    except Exception as e:
+        log(f"read fail: {e}")
+    return records
+
+
+# Текстовые блоки ответа и то, что реально ушло telegram-инструментами.
+def collect_turn(records, trigger_idx):
+    text_blocks = []
+    sent_args = []
+    for i in range(trigger_idx + 1, len(records)):
+        if records[i].get("type") != "assistant":
+            continue
+        msg = records[i].get("message") or {}
+        for ti, t in enumerate(get_text_blocks(msg)):
+            text_blocks.append((i, ti, t))
+        sent_args.extend(get_tool_text_args(msg))
+    return text_blocks, sent_args
+
+
 def main():
     try:
         event = json.load(sys.stdin)
@@ -176,17 +209,7 @@ def main():
     # Держим в памяти только последний ход (от последнего user-сообщения до
     # конца) — transcript у долгих сессий бывает 200+ МБ, полный парс в список
     # раздувал процесс до 500+ МБ и приводил к OOM.
-    records = []
-    with open(transcript, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if rec.get("type") == "user":
-                records = [rec]
-            elif records:
-                records.append(rec)
+    records = read_last_turn(transcript)
     if not records:
         log("no user-input found")
         return
@@ -210,15 +233,20 @@ def main():
         return
     chat_id = chat_m.group(1)
 
-    text_blocks = []
-    sent_args = []
-    for i in range(trigger_idx + 1, len(records)):
-        if records[i].get("type") != "assistant":
-            continue
-        msg = records[i].get("message") or {}
-        for ti, t in enumerate(get_text_blocks(msg)):
-            text_blocks.append((i, ti, t))
-        sent_args.extend(get_tool_text_args(msg))
+    # Stop-хук стартует в ту же секунду, когда ответ дописывается в transcript:
+    # при первом чтении строки assistant в файле может ещё не быть, и хук решал,
+    # что текста нет. Так у ilshat 01-02.09 потерялись три готовых ответа.
+    trig_uuid_first = records[trigger_idx].get("uuid")
+    text_blocks, sent_args = collect_turn(records, trigger_idx)
+    for _ in range(4):
+        if text_blocks:
+            break
+        time.sleep(0.4)
+        fresh = read_last_turn(transcript)
+        if not fresh or fresh[trigger_idx].get("uuid") != trig_uuid_first:
+            break  # пришёл новый ход, этот больше не наш
+        records = fresh
+        text_blocks, sent_args = collect_turn(records, trigger_idx)
 
     if not text_blocks:
         log("no text blocks in this turn")
