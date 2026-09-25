@@ -3,7 +3,7 @@
 # Runs every minute via cron. Handles multiple sessions (root + wife + ...).
 # Patterns:
 #   1. rate-limit dialog stuck                 → Esc; if 5 min same, restart
-#   2. workspace trust prompt                  → "1" Enter
+#   2. workspace trust prompt                  → Down Enter (Yes — второй пункт)
 #   3. auto-mode confirm prompt                → "1" Enter
 #   4. bun MCP died for >30s                   → restart session + nudge
 #   5. "Resume from summary" prompt            → "1" Enter
@@ -71,11 +71,11 @@ restart_session() {
 
   if [[ "$USER" == "root" ]]; then
     tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-      "export PATH=/root/.bun/bin:\$PATH && export DISABLE_AUTOUPDATER=1 && { [ -f /root/.claude/oauth-token-env ] && . /root/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+      "export PATH=/root/.bun/bin:\$PATH && export DISABLE_AUTOUPDATER=1 && { [ -f /root/.claude/oauth-token-env ] && . /root/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --model opus --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
     sleep 2
     tmux pipe-pane -t "$SESSION" -o "cat >> /var/log/claude-tg-pane.log"
   else
-    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && { [ -f \$HOME/.claude/oauth-token-env ] && . \$HOME/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug-$USER.log'"
+    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && { [ -f \$HOME/.claude/oauth-token-env ] && . \$HOME/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --model opus --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug-$USER.log'"
   fi
   sleep 4
   $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
@@ -184,7 +184,9 @@ for entry in "${SESSIONS[@]}"; do
 
   # Pattern 2: workspace trust dialog
   if echo "$pane" | grep -qE "Yes, I trust this folder"; then
-    $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
+    # С CLI 2.1.2xx первым и выделенным идёт «No, exit» — «1»/Enter закрывал бота (EXIT=1).
+    # «Yes» — второй пункт. Основная защита — hasTrustDialogAccepted в ~/.claude.json.
+    $TMUX_CMD send-keys -t "$SESSION" Down Enter 2>/dev/null
     echo "$(date -Iseconds) [$SESSION] confirmed workspace trust" >> "$LOG"
     continue
   fi
