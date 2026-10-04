@@ -42,6 +42,7 @@ cd /root/projects/claude-vps-starter
 
 ## Документация
 
+- [docs/00-overview.md](docs/00-overview.md) — **начни здесь**: схема, ключевые файлы, грабли
 - [docs/01-install.md](docs/01-install.md) — bootstrap на свежем VPS
 - [docs/02-telegram.md](docs/02-telegram.md) — бот, plugin:telegram, allowlist
 - [docs/03-whisper.md](docs/03-whisper.md) — локальная расшифровка голоса
