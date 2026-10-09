@@ -39,6 +39,8 @@ bot: "Вот результат: ..."   ← финал, новый reply, пуш
 
 **Headless cron/scheduled** (`claude -p "..."`) — `sonnet` по умолчанию. Переключай на `opus` если качество страдает.
 
+**🚨 Headless `claude -p` — всегда без Telegram-плагина:** `claude -p --settings '{"enabledPlugins":{"telegram@claude-plugins-official":false}}' ...`. Без флага фоновый запуск поднимает свой Telegram-плагин с тем же токеном, и тот убивает плагин живой сессии бота (watchdog рестартит, сообщения теряются). Ставь флаг в каждом новом кроне/скрипте с `claude -p`.
+
 ## 🚨 Долгие задачи — ТОЛЬКО через subagent с run_in_background: true
 
 Это критическое правило. Claude Code поддерживает параллельные subagents в background через параметр `run_in_background: true` у Agent tool.
