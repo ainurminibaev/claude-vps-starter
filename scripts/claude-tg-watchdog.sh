@@ -45,6 +45,10 @@ restart_session() {
   pkill -9 -u "$USER" -f "bun.*server\.ts" 2>/dev/null
   sleep 3
 
+  # Патчи vps-starter на telegram-плагин (автоподключение групп/каналов).
+  # Кэш плагина перезаписывается при обновлениях — накладываем перед каждым стартом.
+  /usr/local/bin/tg-plugin-sync.sh --patch "$USER" >/dev/null 2>&1 || true
+
   # Resume the same UUID across restarts to keep conversation context.
   # If we have no stored UUID yet (first run) OR jsonl missing, bootstrap a new
   # session via --session-id <new-uuid>; otherwise reuse it via --resume.

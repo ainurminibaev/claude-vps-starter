@@ -227,15 +227,22 @@ def main():
     else:
         trig_text = ""
 
-    chat_m = re.search(r'chat_id="(\d+)"', trig_text)
+    # У групп и каналов chat_id отрицательный (-100...) — без '-?' хук молча
+    # пропускал все групповые сообщения.
+    chat_m = re.search(r'chat_id="(-?\d+)"', trig_text)
     if not chat_m:
         log("trigger is not channel-msg (likely watchdog nudge), skipping")
+        return
+    # Пост канала — входящая информация, а не вопрос. Досылать в канал текст,
+    # который бот написал в консоль, нельзя: это будет публикация.
+    if 'channel_post="true"' in trig_text:
+        log("trigger is channel post, skipping")
         return
     chat_id = chat_m.group(1)
 
     # Stop-хук стартует в ту же секунду, когда ответ дописывается в transcript:
     # при первом чтении строки assistant в файле может ещё не быть, и хук решал,
-    # что текста нет. Так у ilshat 01-02.09 потерялись три готовых ответа.
+    # что текста нет. Так у одного из ботов за два дня потерялись три готовых ответа.
     trig_uuid_first = records[trigger_idx].get("uuid")
     text_blocks, sent_args = collect_turn(records, trigger_idx)
     for _ in range(4):
