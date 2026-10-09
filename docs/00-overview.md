@@ -56,6 +56,10 @@ claude --resume <uuid> --model opus --permission-mode auto --effort high \
    входящего и последнего `reply` в transcript.
 6. **Кроны, вызывающие `claude -p`, должны сами подгрузить токен:**
    `. "$HOME/.claude/oauth-token-env"`. Иначе `Not logged in`.
+   И обязательно без Telegram-плагина:
+   `claude -p --settings '{"enabledPlugins":{"telegram@claude-plugins-official":false}}' ...`.
+   Иначе headless-запуск поднимает свой плагин с тем же токеном, тот по `bot.pid`
+   убивает poller живой сессии, watchdog её рестартит, сообщения в эти минуты теряются.
 7. **Refresh-токен теряется** — и при простое, и при активной работе. Поэтому
    все боты на статичном `setup-token`. Он один на всех и истекает через год
    после выпуска: заранее выпустить новый и разложить по `oauth-token-env`.
