@@ -40,6 +40,8 @@ claude --resume <uuid> --model opus --permission-mode auto --effort high \
 | `scripts/tg-plugin-sync.sh` → `/usr/local/bin/` | Без аргументов — еженедельно: `claude plugin update` у всех ботов + патч + отчёт в Telegram, если что-то обновилось или патч не встал. `--patch <user>` — только патч; его зовёт watchdog перед каждым стартом сессии |
 | `scripts/bot-restart.sh` → `/usr/local/bin/` | Безопасный перезапуск одного бота: ждёт 30 с тишины, гасит мягко, поднимает через watchdog |
 | `$HOME/.claude/channels/telegram/group-context.json`, `topics.json` | Буфер последних сообщений групп (контекст) и названия тем форумов |
+| `scripts/voice-to-text` → `/usr/local/bin/` | Общий роутер расшифровки голоса для всех ботов: Whisper (ru/en/ar) или татарский сервис. Настройки `/etc/voice-to-text.conf`, решения в `journalctl -t voice-to-text`. `whisper_via_api.sh` — старое имя, обёртка над ним |
+| `tatar-asr/` → `/opt/tatar-asr/` + `tatar-asr.socket`/`.service` | Опционально: распознавание татарского на `127.0.0.1:9002` (omniASR 300M int8). Запускается по первому запросу, выгружается через 15 мин простоя. Ставится `install-tatar-asr.sh`, см. docs/03 |
 
 ## Грабли (всё это уже случалось)
 
@@ -80,6 +82,11 @@ claude --resume <uuid> --model opus --permission-mode auto --effort high \
     Запускать перезапуск через `nohup … &` и читать результат отдельной командой.
 13. **Обычная группа превращается в супергруппу** (например, при включении тем) и
     получает новый id `-100…`. Патч переносит доступ сам; без него бот молча глохнет.
+14. **`/root` закрыт (700) — общие скрипты только в `/usr/local/bin`.** Скрипт в
+    `/root/.claude/scripts/` (и симлинк на него) другие пользователи-боты выполнить
+    не могут: `Permission denied`. Всё, чем пользуются несколько ботов, — копией в
+    `/usr/local/bin` (так стоят `voice-to-text`, `bot-restart.sh`, `tg-plugin-sync.sh`).
+    После `git pull` — снова `install.sh`, чтобы обновилась копия `voice-to-text`.
 
 ## Группы и каналы (патч telegram-плагина)
 

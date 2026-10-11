@@ -1,0 +1,39 @@
+# Installed by install-tatar-asr.sh (paths/port are substituted there if overridden).
+[Unit]
+Description=Tatar ASR HTTP service (omniASR CTC 300M int8), started on demand, exits when idle
+Documentation=file:/opt/tatar-asr/server.py
+Requires=tatar-asr.socket
+After=tatar-asr.socket network.target
+
+[Service]
+Type=simple
+User=tatar-asr
+Group=tatar-asr
+ExecStart=/opt/tatar-asr/venv/bin/python /opt/tatar-asr/server.py
+# process exits by itself after IDLE_TIMEOUT_SEC without requests -> memory returned to OS;
+# tatar-asr.socket keeps listening and starts it again on the next connection
+Environment=MODEL_DIR=/opt/tatar-asr/model
+Environment=IDLE_TIMEOUT_SEC=900
+Environment=NUM_THREADS=2
+Environment=OMP_NUM_THREADS=2
+Environment=MALLOC_ARENA_MAX=2
+Environment=HOME=/tmp
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+Environment=PYTHONWARNINGS=ignore
+Environment=PYTHONUNBUFFERED=1
+Nice=10
+CPUWeight=50
+IOSchedulingClass=idle
+MemoryMax=2500M
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes

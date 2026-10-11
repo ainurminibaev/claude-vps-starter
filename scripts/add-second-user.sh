@@ -126,7 +126,13 @@ cp "$REPO_DIR/hooks/stop-autoreply.py" "$HOME_DIR/.claude/hooks/"
 chmod +x "$HOME_DIR/.claude/hooks/stop-autoreply.py"
 cp "$REPO_DIR/scripts/send_tg.sh" "$HOME_DIR/.claude/scripts/"
 chmod +x "$HOME_DIR/.claude/scripts/send_tg.sh"
-# whisper helper (voice message transcription)
+# voice-to-text router is shared by all users and lives in /usr/local/bin
+# (/root is 700 — a new user cannot execute anything under /root)
+if [ ! -x /usr/local/bin/voice-to-text ] && [ -f "$REPO_DIR/scripts/voice-to-text" ]; then
+  install -m 755 "$REPO_DIR/scripts/voice-to-text" /usr/local/bin/voice-to-text
+  echo "[+] installed /usr/local/bin/voice-to-text"
+fi
+# whisper_via_api.sh — old name, thin wrapper over voice-to-text (kept for older CLAUDE.md)
 if [ -f "$REPO_DIR/scripts/whisper_via_api.sh" ]; then
   cp "$REPO_DIR/scripts/whisper_via_api.sh" "$HOME_DIR/.claude/scripts/"
   chmod +x "$HOME_DIR/.claude/scripts/whisper_via_api.sh"
@@ -169,7 +175,7 @@ if [ ! -f "$HOME_DIR/CLAUDE.md" ]; then
 
 ## Обработка входящих
 - Текст → отвечай прямо через plugin:telegram:reply.
-- Голосовое (voice/audio из channels/telegram/inbox/*.oga) → транскрибируй через ~/.claude/scripts/whisper_via_api.sh <path>, потом ответь по содержанию.
+- Голосовое (voice/audio из channels/telegram/inbox/*.oga) → транскрибируй через /usr/local/bin/voice-to-text <path>, потом ответь по содержанию. Сначала покажи транскрипт отдельным сообщением.
 - Долгие задачи — уточни в TG что делаешь.
 
 ## Тон
@@ -243,6 +249,7 @@ check "user $USER"                      "id $USER"
 check ".claude/settings.json"           "[ -f $HOME_DIR/.claude/settings.json ]"
 check "stop-autoreply.py executable"    "[ -x $HOME_DIR/.claude/hooks/stop-autoreply.py ]"
 check "send_tg.sh executable"           "[ -x $HOME_DIR/.claude/scripts/send_tg.sh ]"
+check "voice-to-text"                   "sudo -u $USER test -x /usr/local/bin/voice-to-text"
 check ".env chmod 600"                  "[ \$(stat -c '%a' $HOME_DIR/.claude/channels/telegram/.env) = 600 ]"
 check "access.json"                     "[ -f $HOME_DIR/.claude/channels/telegram/access.json ]"
 check ".claude.json"                    "[ -f $HOME_DIR/.claude.json ]"

@@ -35,40 +35,49 @@ services:
 
 Первый запуск скачает модель `base` (~75 МБ) в `./models/`. Дальше модель живёт в RAM между запросами — это и есть warm-эффект.
 
-## 2. Скрипт-обёртка
+## 2. Роутер voice-to-text
 
-Файл: `scripts/whisper_via_api.sh`
+Файл: `scripts/voice-to-text`, ставится в `/usr/local/bin/voice-to-text` (это делает `install.sh`).
 
 ```bash
-#!/bin/bash
-set -euo pipefail
-if [ -z "${1:-}" ]; then
-  echo "usage: $0 <audio-file>" >&2
-  exit 1
-fi
-curl -sS --fail-with-body -X POST \
-  -F "audio_file=@${1}" \
+voice-to-text <audio-file> [--lang auto|ru|tt|en|ar]
+```
+
+- stdout — только текст, stderr — одна строка о том, куда ушёл файл и сколько это заняло.
+- Решения пишутся в syslog: `journalctl -t voice-to-text -n 20`.
+- `--lang ru|en|ar` — сразу в Whisper с этим языком. `--lang tt` — сразу в татарский сервис.
+- `--lang auto` (по умолчанию):
+  - татарский сервис **не установлен** — сразу Whisper `language=ru`, без определения языка. Задержка как у старого скрипта;
+  - татарский сервис **установлен** — см. раздел 8.
+
+Под капотом для Whisper:
+
+```bash
+curl -sS --fail-with-body -X POST -F "audio_file=@voice.oga" \
   "http://127.0.0.1:9000/asr?language=ru&output=txt&encode=true"
 ```
 
-Параметры:
 - `language=ru` — подсказка языка, точность чуть выше.
 - `output=txt` — plain text, без JSON-обёртки.
 - `encode=true` — встроенный ffmpeg декодирует `.oga`/`.ogg`/`.m4a` как есть.
 
-Положи скрипт в `/root/.claude/scripts/whisper_via_api.sh`, сделай `chmod +x`. `install.sh` симлинкает его автоматически.
+Настройки — в `/etc/voice-to-text.conf` (строки `KEY=value`; переменные окружения с тем же именем важнее файла): `TATAR_ENABLED`, `TATAR_URL`, `WHISPER_URL`, `TATAR_TIMEOUT`, `WHISPER_TIMEOUT`, `VTT_CONF_MIN`. Без файла — Whisper на `127.0.0.1:9000`, татарский выключен.
+
+**Почему `/usr/local/bin`, а не `/root/.claude/scripts`:** у `/root` права 700. Если на сервере несколько ботов (docs/05), другие пользователи не могут выполнить скрипт из `/root/...`, даже по симлинку. Общие скрипты — только в `/usr/local/bin`. Роутер ставится **копией**: после `git pull` прогони `install.sh` ещё раз, чтобы обновить его.
+
+Старое имя `scripts/whisper_via_api.sh` оставлено для совместимости — это тонкая обёртка: `exec /usr/local/bin/voice-to-text "$@"`. Если роутер ещё не установлен, обёртка работает по-старому (Whisper ru). `install.sh` симлинкает её в `/root/.claude/scripts/whisper_via_api.sh`.
 
 Проверить:
 
 ```bash
-/root/.claude/scripts/whisper_via_api.sh /path/to/voice.oga
+voice-to-text /path/to/voice.oga
 ```
 
 Должен вывести распознанный текст.
 
 ## 3. Куда кладутся голосовые от Telegram
 
-plugin:telegram сохраняет вложения в `/root/.claude/channels/telegram/inbox/*.oga`. Claude получает `attachment_file_id` в событии, вызывает `download_attachment`, получает путь — и пробрасывает его в `whisper_via_api.sh` через `Bash`.
+plugin:telegram сохраняет вложения в `/root/.claude/channels/telegram/inbox/*.oga`. Claude получает `attachment_file_id` в событии, вызывает `download_attachment`, получает путь — и пробрасывает его в `voice-to-text` через `Bash`.
 
 Это поведение фиксируется в `CLAUDE.md` — там прописано: для всех голосовых в `/root/.claude/channels/telegram/inbox/` использовать именно warm-API, а не CLI.
 
@@ -121,3 +130,84 @@ whisper /path/to/voice.oga --language ru --output_format txt --model base
 ## 7. Длинные аудио (>30 сек обработки)
 
 Если голосовуха длинная (5+ минут), расшифровка может занять минуту. В `CLAUDE.md` предписано: если предполагаешь >30 сек — запусти через `Bash run_in_background`, сразу отправь ack в Telegram «расшифровываю, минуту», дождись результата и продолжай.
+
+## 8. Татарский язык (опционально)
+
+Whisper татарский не знает: модель `base` выдаёт на татарской речи мусор, а `/detect-language` называет её азербайджанским, казахским или литовским с низкой уверенностью. На этом и держится маршрутизация: русскую речь Whisper узнаёт уверенно (ru ≥ 0.9), а всё неуверенное — скорее всего татарский.
+
+### Как это работает
+
+```
+голосовое → voice-to-text
+              │
+              ├─ Whisper /detect-language (~3 с)
+              │     ru / en / ar и уверенность ≥ 0.80 → Whisper /asr с этим языком
+              │     всё остальное                     → татарский сервис :9002
+              │
+              └─ татарский сервис упал / таймаут → откат на Whisper ru
+```
+
+Татарский сервис — `tatar-asr/server.py`: модель [aadel4/omniASR-CTC-300M-v2](https://huggingface.co/aadel4/omniASR-CTC-300M-v2) (Omnilingual ASR 300M, Apache-2.0), сжатая до int8 для CPU. HTTP на `127.0.0.1:9002`: `POST /asr` (поле `audio_file`, любой формат, который ест ffmpeg) → text/plain, `GET /health` → JSON.
+
+Сервис **спит**, когда не нужен. Порт держит systemd (`tatar-asr.socket`); первый запрос будит процесс, тот грузит модель, отвечает и через 15 минут без запросов (`IDLE_TIMEOUT_SEC=900`) сам выходит и отдаёт память.
+
+### Цифры (2 vCPU, без GPU)
+
+| | |
+|---|---|
+| Скорость | RTF ~0.3–0.6: минута речи за 20–35 с |
+| Память | ~1 ГБ, пока модель загружена; 0 в простое |
+| Холодный старт | +~8 с к первому запросу после простоя |
+| Определение языка | +~3 с к каждому голосовому (и к русским тоже) |
+| Диск | ~0.4 ГБ модель + venv; при установке временно ~2 ГБ (+~1.5 ГБ, если ставится torch) |
+| Ограничения | `Nice=10`, `CPUWeight=50`, `MemoryMax=2500M` — не душит ботов |
+
+Текст на выходе — строчными, без пунктуации. Длинные записи режутся на куски по ~30 с по паузам. Запросы обрабатываются по одному, остальные ждут в очереди.
+
+### Установка
+
+```bash
+sudo /root/projects/claude-vps-starter/tatar-asr/install-tatar-asr.sh
+```
+
+Скрипт идемпотентный. Что делает:
+
+1. Проверяет свободное место и память (для квантизации нужно ~2.5 ГБ RAM+swap на пике).
+2. Ставит `ffmpeg` и `python3-venv`, если их нет.
+3. Создаёт системного пользователя `tatar-asr` и `/opt/tatar-asr/`.
+4. Делает venv с `--system-site-packages`; если torch нет — ставит CPU-сборку, плюс `transformers>=5.3,<6`.
+5. Качает модель (~1.3 ГБ), квантует в int8 (`quantize.py`, несколько минут), fp32-копию удаляет.
+6. Ставит `tatar-asr.socket` + `tatar-asr.service`, включает сокет.
+7. Обновляет `/usr/local/bin/voice-to-text` и пишет `TATAR_ENABLED=1` в `/etc/voice-to-text.conf`.
+8. Прогоняет тестовый запрос.
+
+Другие путь/порт/пользователь: `INSTALL_DIR=... PORT=... SVC_USER=... sudo -E ./install-tatar-asr.sh`. Пересобрать модель: `--force-model`.
+
+Проверить:
+
+```bash
+voice-to-text /path/to/tatar.oga               # авто
+voice-to-text /path/to/tatar.oga --lang tt     # сразу в татарский
+journalctl -t voice-to-text -n 5               # куда ушёл файл и почему
+systemctl status tatar-asr.socket tatar-asr.service
+journalctl -u tatar-asr.service -n 50
+```
+
+В `CLAUDE.md` бота стоит добавить: татарский транскрипт приходит без пунктуации и строчными — это нормально, а не ошибка.
+
+### Откат
+
+Выключить татарский, оставить файлы:
+
+```bash
+sudo sed -i 's/^TATAR_ENABLED=.*/TATAR_ENABLED=0/' /etc/voice-to-text.conf   # роутер снова сразу в Whisper ru
+sudo systemctl disable --now tatar-asr.socket tatar-asr.service
+```
+
+Удалить полностью (сервис, пользователь, `/opt/tatar-asr`):
+
+```bash
+sudo /root/projects/claude-vps-starter/tatar-asr/install-tatar-asr.sh --uninstall
+```
+
+Вернуть старый скрипт без роутера: `git checkout <старый коммит> -- scripts/whisper_via_api.sh` — там голый curl в Whisper ru.
