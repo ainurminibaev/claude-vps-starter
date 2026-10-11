@@ -12,6 +12,8 @@ WATCHDOG_SRC="$REPO_DIR/scripts/claude-tg-watchdog.sh"
 WATCHDOG_DST="/root/claude-tg-watchdog.sh"
 WHISPER_SCRIPT_SRC="$REPO_DIR/scripts/whisper_via_api.sh"
 WHISPER_SCRIPT_DST="/root/.claude/scripts/whisper_via_api.sh"
+ROUTER_SRC="$REPO_DIR/scripts/voice-to-text"
+ROUTER_DST="/usr/local/bin/voice-to-text"
 
 echo "=== claude-vps-starter bootstrap ==="
 echo "Репо: $REPO_DIR"
@@ -60,9 +62,24 @@ else
 fi
 echo
 
-# --- Whisper helper script ---
+# --- voice-to-text router + whisper helper script ---
 
-echo "3. Whisper helper:"
+echo "3. voice-to-text + Whisper helper:"
+# Роутер — копией в /usr/local/bin, не симлинком: /root закрыт (700),
+# другие пользователи-боты не смогут выполнить файл из /root/projects/...
+chmod +x "$ROUTER_SRC"
+if cmp -s "$ROUTER_SRC" "$ROUTER_DST"; then
+  echo "[ok] $ROUTER_DST актуален"
+else
+  install -m 755 "$ROUTER_SRC" "$ROUTER_DST"
+  echo "[+] $ROUTER_DST установлен/обновлён"
+fi
+if [ -f /etc/systemd/system/tatar-asr.socket ]; then
+  echo "[ok] татарский сервис установлен (tatar-asr.socket)"
+else
+  echo "[--] татарский сервис не установлен — роутер работает как обычный Whisper ru."
+  echo "     Опционально: sudo $REPO_DIR/tatar-asr/install-tatar-asr.sh (docs/03-whisper.md)"
+fi
 mkdir -p /root/.claude/scripts
 chmod +x "$WHISPER_SCRIPT_SRC"
 if [ -L "$WHISPER_SCRIPT_DST" ] || [ -f "$WHISPER_SCRIPT_DST" ]; then

@@ -1,0 +1,11 @@
+# Installed by install-tatar-asr.sh. Port 9002 is what voice-to-text expects (TATAR_URL).
+[Unit]
+Description=Tatar ASR (omniASR CTC 300M int8) - socket activation on 127.0.0.1:9002
+
+[Socket]
+ListenStream=127.0.0.1:9002
+Accept=no
+Backlog=64
+
+[Install]
+WantedBy=sockets.target

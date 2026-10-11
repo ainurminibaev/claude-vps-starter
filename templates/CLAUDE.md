@@ -72,13 +72,15 @@ bot: "Вот результат: ..."   ← финал, новый reply, пуш
 
 Whisper поднят в Docker как warm-сервис: `onerahmet/openai-whisper-asr-webservice` с `faster_whisper` + `base`, порт 127.0.0.1:9000. Модель в памяти постоянно — минутная голосовуха расшифровывается за ~10с.
 
-**Используй API через обёртку:**
+**Используй общий роутер:**
 
 ```
-/root/.claude/scripts/whisper_via_api.sh <path>
+/usr/local/bin/voice-to-text <path> [--lang auto|ru|tt|en|ar]
 ```
 
-Скрипт делает `curl -F audio_file=@<path> "http://127.0.0.1:9000/asr?language=ru&output=txt&encode=true"` и возвращает plain text. Флаг `encode=true` включает встроенный ffmpeg, `.oga` жуётся как есть. Файлы от Telegram: `/root/.claude/channels/telegram/inbox/*.oga`.
+Старое имя `/root/.claude/scripts/whisper_via_api.sh <path>` тоже работает — это обёртка над роутером. Роутер лежит в `/usr/local/bin`, потому что `/root` закрыт (700) и другие боты на сервере не могут запускать скрипты оттуда. Файлы от Telegram: `/root/.claude/channels/telegram/inbox/*.oga`.
+
+Если на сервере установлен татарский сервис (опционально, `tatar-asr/`, порт 127.0.0.1:9002), роутер сначала спрашивает у Whisper язык (~3с): ru/en/ar с уверенностью ≥0.80 → Whisper с этим языком, всё остальное → татарский сервис. Татарский текст приходит строчными, без пунктуации. Первый запрос после простоя +~8с (сервис просыпается), через 15 мин без запросов он выгружается. Если татарский сервис упал — роутер сам откатывается на Whisper ru. Без татарского сервиса роутер сразу идёт в Whisper ru, как раньше. Решения роутера: `journalctl -t voice-to-text`.
 
 **НЕ используй** старый CLI `whisper <path> --language ru --output_format txt --model base` — он грузит модель с диска на каждый запуск (30+с overhead).
 
