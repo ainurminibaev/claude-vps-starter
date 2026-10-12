@@ -45,7 +45,7 @@ Requirements:
 - Reply with only: out.png"
 
 set +e
-timeout "$tmo" "$CODEX" exec --skip-git-repo-check --ephemeral --disable memories -s "${CODEX_SANDBOX:-workspace-write}" -C "$work" "${model_args[@]}" "${img_args[@]}" "$full" </dev/null >"$log" 2>&1
+timeout "$tmo" "$CODEX" exec --skip-git-repo-check --ephemeral --disable memories -s "${CODEX_SANDBOX:-workspace-write}" -C "$work" "${model_args[@]}" "${img_args[@]}" -- "$full" </dev/null >"$log" 2>&1
 rc=$?
 set -e
 img="$work/out.png"; [[ -f "$img" ]] || img="$(ls -t "$work"/*.png 2>/dev/null | head -n1 || true)"
