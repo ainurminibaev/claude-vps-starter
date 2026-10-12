@@ -56,6 +56,8 @@ RE_CAPACITY = re.compile(
     r"connection (reset|closed|refused)|error sending request|timed? ?out", re.I)
 RE_RATE = re.compile(r"\b429\b|rate limit|too many requests", re.I)
 RE_LOGIN = re.compile(r"not logged in|не залогинен|unauthorized|\b401\b|refresh token", re.I)
+# Ошибки вызова codex (аргументы, версия CLI) — от модели не зависят, повторять бессмысленно.
+RE_FATAL = re.compile(r"no prompt provided|unexpected argument|invalid value for|unrecognized subcommand|error: the following required", re.I)
 
 generate_lock = threading.Lock()
 queue_size = 0
@@ -81,7 +83,9 @@ def peer_user(sock: socket.socket) -> str:
 
 
 def classify(rc: int, text: str) -> str:
-    """limit | login | capacity | rate | timeout | no_image | other"""
+    """fatal | limit | login | capacity | rate | timeout | no_image | other"""
+    if RE_FATAL.search(text):
+        return "fatal"
     if rc == 3 or RE_LOGIN.search(text):
         return "login"
     if RE_LIMIT.search(text):
@@ -222,6 +226,10 @@ class Handler(BaseHTTPRequestHandler):
                 log(f"{self.caller} attempt={attempt} model={model} FAIL kind={kind} rc={rc} {last[-200:]!r}")
                 if kind == "login":
                     self.event(event="error", code=3, error="сервис разлогинился в ChatGPT — нужен администратор")
+                    return
+                if kind == "fatal":
+                    self.event(event="error", code=1,
+                               error="ошибка вызова codex на стороне сервиса (не модели) — нужен администратор: " + last[-300:])
                     return
                 if kind == "limit":
                     self.event(event="error", code=4, error="исчерпан лимит подписки ChatGPT. " + last[-300:])
