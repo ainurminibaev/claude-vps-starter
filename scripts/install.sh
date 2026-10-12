@@ -34,11 +34,10 @@ check() {
 }
 
 echo "1. Проверка зависимостей:"
-check docker docker
-check "docker compose" docker   # plugin form
 check tmux tmux
 check git git
 check curl curl
+check python3 python3
 check node node
 check bun bun
 check claude claude
@@ -64,7 +63,7 @@ echo
 
 # --- voice-to-text router + whisper helper script ---
 
-echo "3. voice-to-text + Whisper helper:"
+echo "3. voice-to-text (роутер расшифровки голоса):"
 # Роутер — копией в /usr/local/bin, не симлинком: /root закрыт (700),
 # другие пользователи-боты не смогут выполнить файл из /root/projects/...
 chmod +x "$ROUTER_SRC"
@@ -77,9 +76,10 @@ fi
 if [ -f /etc/systemd/system/tatar-asr.socket ]; then
   echo "[ok] татарский сервис установлен (tatar-asr.socket)"
 else
-  echo "[--] татарский сервис не установлен — роутер работает как обычный Whisper ru."
-  echo "     Опционально: sudo $REPO_DIR/tatar-asr/install-tatar-asr.sh (docs/03-whisper.md)"
+  echo "[--] татарский сервис не установлен — всё распознаётся как русский (GigaAM)."
+  echo "     Опционально: sudo $REPO_DIR/tatar-asr/install-tatar-asr.sh (docs/03-voice.md)"
 fi
+# whisper_via_api.sh — старое имя, обёртка над роутером (для старых CLAUDE.md)
 mkdir -p /root/.claude/scripts
 chmod +x "$WHISPER_SCRIPT_SRC"
 if [ -L "$WHISPER_SCRIPT_DST" ] || [ -f "$WHISPER_SCRIPT_DST" ]; then
@@ -110,19 +110,24 @@ else
 fi
 echo
 
-# --- Whisper Docker ---
+# --- Распознавание речи: gigaam-asr (язык + русский) ---
 
-echo "5. Whisper Docker:"
-if command -v docker >/dev/null 2>&1; then
-  if docker ps --format '{{.Names}}' | grep -qF whisper-asr; then
-    echo "[ok] контейнер whisper-asr уже запущен"
-  else
-    echo "[>] docker compose up -d в $REPO_DIR/whisper-asr"
-    (cd "$REPO_DIR/whisper-asr" && docker compose up -d)
-    echo "[+] whisper-asr поднят (первый запуск подтянет модель ~75MB)"
-  fi
+echo "5. Распознавание речи (gigaam-asr):"
+if [ "${SKIP_STT:-0}" = 1 ]; then
+  echo "[--] пропущено (SKIP_STT=1). Поставить: sudo $REPO_DIR/gigaam-asr/install-gigaam-asr.sh"
 else
-  echo "[--] Docker не установлен, пропускаю. Поставь Docker и запусти install.sh снова."
+  if [ -s /opt/gigaam-asr/models/gigaam.int8.onnx ]; then
+    echo "[>] gigaam-asr уже стоит — обновляю код/юниты (модели не пересобираются)"
+  else
+    echo "[>] ставлю gigaam-asr: качает веса из первоисточников (sha256), собирает ONNX — 10–20 минут"
+  fi
+  if ! "$REPO_DIR/gigaam-asr/install-gigaam-asr.sh"; then
+    echo "[!] gigaam-asr не встал — смотри вывод выше и docs/03-voice.md, потом запусти install.sh снова"
+  fi
+fi
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx whisper-asr; then
+  echo "[i] найден старый контейнер whisper-asr — роутер его больше не использует."
+  echo "    Как удалить: docs/03-voice.md, раздел «Переезд с Whisper»."
 fi
 echo
 

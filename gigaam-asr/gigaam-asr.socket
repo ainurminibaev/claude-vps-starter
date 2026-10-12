@@ -1,0 +1,12 @@
+# Installed by install-gigaam-asr.sh. Port 9003 is what voice-to-text expects (GIGAAM_URL).
+# The socket always listens; the service starts on the first request and exits when idle.
+[Unit]
+Description=GigaAM ASR (language ID + Russian, ONNX) - socket activation on 127.0.0.1:9003
+
+[Socket]
+ListenStream=127.0.0.1:9003
+Accept=no
+Backlog=64
+
+[Install]
+WantedBy=sockets.target

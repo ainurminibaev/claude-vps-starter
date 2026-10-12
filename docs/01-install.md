@@ -103,16 +103,16 @@ cd claude-vps-starter
 ```
 
 Он:
-- проверит, что Docker / Bun / tmux на месте,
+- проверит, что Bun / tmux / python3 на месте,
 - симлинканёт `claude-tg-watchdog.sh` в `/root/`,
 - добавит в crontab запуск watchdog (если его там ещё нет),
-- поднимет Whisper-контейнер,
+- поставит роутер `voice-to-text` и сервис распознавания речи `gigaam-asr` (сборка моделей 10–20 минут один раз; пропустить — `SKIP_STT=1`),
 - напечатает, что осталось сделать руками (Telegram, первый запуск сессии).
 
 ## 10. Дальше
 
 - [02-telegram.md](02-telegram.md) — создать бота, поставить plugin:telegram, настроить allowlist
-- [03-whisper.md](03-whisper.md) — проверить расшифровку голоса
+- [03-voice.md](03-voice.md) — проверить расшифровку голоса (+ опционально татарский)
 - [04-watchdog.md](04-watchdog.md) — убедиться, что cron крутится
 - Положить `templates/CLAUDE.md` в `/root/CLAUDE.md` и адаптировать под свои проекты
 

@@ -95,33 +95,24 @@ sudo pkill -9 -u <USER> -f bun.real
 
 В чек-листе создания нового инстанса (`docs/05-multi-user.md` → Шаг 9) есть пункт «cmdline bun содержит `--preload`» и «heartbeat свежий». Прогоняй после каждого нового юзера.
 
-## Whisper не отвечает на голосовые
+## Голосовые не расшифровываются
 
 ```bash
-docker ps | grep whisper
+journalctl -t voice-to-text -n 10                        # куда ушёл файл и что упало
+systemctl status gigaam-asr.socket tatar-asr.socket      # сокеты должны быть active (listening)
+journalctl -u gigaam-asr.service -n 50                   # ошибки загрузки моделей, OOM
 ```
 
-Если пусто:
+Сокет не слушает — `sudo systemctl restart gigaam-asr.socket`. Сервис между запросами в `inactive` — это норма, он спит.
+
+Проверить сервис напрямую:
 
 ```bash
-cd /root/projects/claude-vps-starter/whisper-asr
-docker compose up -d
-docker logs whisper-asr --tail 50
+curl -sS http://127.0.0.1:9003/health            # разбудит сервис, вернёт JSON со status
+voice-to-text /path/to/voice.oga --lang ru
 ```
 
-Если контейнер есть, но виснет:
-
-```bash
-docker compose restart
-# или
-docker compose down && docker compose up -d
-```
-
-Проверить API напрямую:
-
-```bash
-curl -sS "http://127.0.0.1:9000/docs"   # должна открыться swagger-страница
-```
+Модели пропали или битые — `sudo /root/projects/claude-vps-starter/gigaam-asr/install-gigaam-asr.sh --force-model`. Подробно — [03-voice.md](03-voice.md).
 
 ## Bun MCP всё время падает
 
@@ -202,7 +193,7 @@ Watchdog поднимет новую, `claude -c` попытается восс�
 ```bash
 df -h
 du -sh /root/.claude/channels/telegram/inbox/   # могут накопиться .oga
-du -sh /root/projects/claude-vps-starter/whisper-asr/models/
+du -sh /opt/gigaam-asr /opt/tatar-asr 2>/dev/null
 du -sh /var/log/claude-tg-*.log
 ```
 
@@ -212,7 +203,7 @@ du -sh /var/log/claude-tg-*.log
 
 Порядок проверки снизу вверх:
 
-1. `docker ps` — Whisper жив?
+1. `systemctl is-active gigaam-asr.socket` — распознавание речи живо?
 2. `tmux ls` — сессия жива?
 3. `tmux capture-pane -t claude-tg -p | tail -30` — что на экране?
 4. `pgrep -af bun` — MCP жив?

@@ -5,9 +5,9 @@
 
 ## Что ты получишь
 
-- **Telegram-бот** — пишешь ему в личку, он отвечает. Голосовые распознаются локально через Whisper. Фото читаются как multimodal input.
+- **Telegram-бот** — пишешь ему в личку, он отвечает. Голосовые распознаются локально, на твоём сервере. Фото читаются как multimodal input.
 - **24/7 аптайм** — watchdog в cron раз в минуту проверяет tmux-сессию, автоматически дисмиссит застрявшие диалоги (rate-limit, workspace trust, auto-mode), перезапускает если упало.
-- **Whisper локально** — warm Docker-контейнер на 127.0.0.1:9000, модель постоянно в памяти. Минутная голосовуха расшифровывается за ~10 секунд, приватно, бесплатно. Опционально — татарский язык: отдельный сервис (omniASR 300M int8) просыпается по запросу, роутер `voice-to-text` сам решает, куда отправить голосовое.
+- **Распознавание голоса локально** — роутер `voice-to-text` определяет язык (VoxLingua107) и отдаёт русскую речь в GigaAM v3 (с пунктуацией, минута речи за ~5–10 с, без torch, ~400 МБ RAM только пока работает). Опционально — татарский, английский, арабский и другие языки: отдельный сервис Omnilingual 300M. Оба сервиса просыпаются по запросу и засыпают в простое. Модели качаются из первоисточников со сверкой sha256.
 - **Multi-user** — на одном VPS можно поднять несколько инстансов: себе, жене, коллеге. У каждого свой Linux-юзер, свой бот, свой API-ключ и свой контекст.
 - **Memory system** — агент помнит твои предпочтения между сессиями (язык ответов, часовой пояс, стиль отчётов, решения по проектам). Индекс в `MEMORY.md`, отдельные .md-файлы на каждый факт.
 - **Конвенция проектов** — всё в `/root/projects/<name>/`, системное в `/root/`. Агент сам ориентируется по этой структуре.
@@ -18,7 +18,7 @@
 ```
 Telegram → @твой_бот → plugin:telegram MCP → Claude Code (tmux: claude-tg)
                                                     ↓
-                                          Whisper API (Docker :9000)
+                                          voice-to-text → gigaam-asr :9003 / tatar-asr :9002
                                           Memory (/root/.claude/...)
                                           Projects (/root/projects/...)
                                                     ↓
@@ -45,7 +45,7 @@ cd /root/projects/claude-vps-starter
 - [docs/00-overview.md](docs/00-overview.md) — **начни здесь**: схема, ключевые файлы, грабли
 - [docs/01-install.md](docs/01-install.md) — bootstrap на свежем VPS
 - [docs/02-telegram.md](docs/02-telegram.md) — бот, plugin:telegram, allowlist
-- [docs/03-whisper.md](docs/03-whisper.md) — локальная расшифровка голоса (+ опционально татарский)
+- [docs/03-voice.md](docs/03-voice.md) — локальная расшифровка голоса (+ опционально татарский), переезд с Whisper
 - [docs/04-watchdog.md](docs/04-watchdog.md) — авто-восстановление сессии
 - [docs/05-multi-user.md](docs/05-multi-user.md) — второй инстанс для жены/коллеги
 - [docs/06-rules-claudemd.md](docs/06-rules-claudemd.md) — как устроен CLAUDE.md и memory
@@ -58,7 +58,7 @@ cd /root/projects/claude-vps-starter
 
 ## Требования
 
-- VPS: 2 vCPU / 4 GB RAM минимум (Whisper base-модель + Claude Code + MCP). Для модели `small` лучше 6+ GB.
+- VPS: 2 vCPU / 4 GB RAM минимум (Claude Code + MCP + распознавание речи; разовая сборка моделей при установке берёт ~2.5 ГБ RAM+swap). С татарским сервисом лучше 6+ GB.
 - Ubuntu 22.04 / 24.04 (должно работать и на Debian 12).
 - Anthropic API-ключ (или подписка Claude Pro/Max с совместимым доступом к Claude Code).
 - Telegram-аккаунт и доступ к @BotFather.
@@ -71,4 +71,4 @@ cd /root/projects/claude-vps-starter
 
 ## Лицензия
 
-MIT. Код Claude Code, plugin:telegram, Whisper ASR — у их авторов.
+MIT. Код Claude Code, plugin:telegram — у их авторов. Модели распознавания речи: GigaAM — MIT, VoxLingua107 ECAPA (SpeechBrain) — Apache-2.0 (датасет VoxLingua107 — CC BY 4.0), Omnilingual 300M — Apache-2.0; подробнее в [docs/03-voice.md](docs/03-voice.md).

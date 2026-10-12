@@ -89,4 +89,4 @@ tmux attach -t claude-tg
 - `ps -ef | grep bun` → есть процесс `bun ... server.ts` (MCP).
 - В личке с ботом работает диалог.
 
-Дальше — [03-whisper.md](03-whisper.md).
+Дальше — [03-voice.md](03-voice.md).
