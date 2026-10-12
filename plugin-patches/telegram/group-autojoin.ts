@@ -1,4 +1,4 @@
-// ── [vps-starter patch: group-autojoin v3] ─────────────────────────────────
+// ── [vps-starter patch: group-autojoin v4] ─────────────────────────────────
 // Источник: claude-vps-starter/plugin-patches/telegram/. Накладывается заново
 // при каждом старте сессии (watchdog), потому что кэш плагина перезаписывается
 // при обновлениях.
@@ -398,6 +398,52 @@ bot.on('message:forum_topic_edited', async (ctx, next) => {
     vpsRememberTopic(String(ctx.chat.id), String(ctx.message.message_thread_id), safeName(name) ?? name)
   }
   return next()
+})
+
+// ── Кнопки «Сохранить / Удалить» для больших старых файлов ──
+// Сообщение с кнопками шлёт /usr/local/bin/bigfile-retention.py (от root, через Bot API).
+// Нажатие приходит сюда, в поллер бота: записываем решение в файл, который читает
+// тот же скрипт. Модель не участвует — решение владельца фиксируется как есть.
+// bigfile-decisions.json = { token: { decision: "keep"|"del", by: user_id, at: iso } }
+const VPS_BF_FILE = join(STATE_DIR, 'bigfile-decisions.json')
+
+bot.on('callback_query:data', async (ctx, next) => {
+  const m = /^bf:(keep|del|noop):([0-9a-f]{0,16})$/.exec(ctx.callbackQuery.data)
+  if (!m) return next()
+  const [, action, token] = m
+  if (action === 'noop') {
+    await ctx.answerCallbackQuery().catch(() => {})
+    return
+  }
+  const senderId = String(ctx.from.id)
+  if (!loadAccess().allowFrom.includes(senderId)) {
+    await ctx.answerCallbackQuery({ text: 'Not authorized.' }).catch(() => {})
+    return
+  }
+  let decisions: Record<string, { decision: string; by: string; at: string }> = {}
+  try { decisions = JSON.parse(readFileSync(VPS_BF_FILE, 'utf8')) } catch {}
+  decisions[token] = { decision: action, by: senderId, at: new Date().toISOString() }
+  try {
+    const tmp = VPS_BF_FILE + '.tmp'
+    writeFileSync(tmp, JSON.stringify(decisions, null, 2) + '\n', { mode: 0o600 })
+    renameSync(tmp, VPS_BF_FILE)
+  } catch (err) {
+    process.stderr.write(`telegram channel: bigfile decision save failed: ${err}\n`)
+    await ctx.answerCallbackQuery({ text: 'Не сохранилось, попробуйте ещё раз.' }).catch(() => {})
+    return
+  }
+
+  // Строку с нажатым файлом заменяем отметкой, чтобы было видно, что решено.
+  const msg = ctx.callbackQuery.message as { reply_markup?: { inline_keyboard: { text: string; callback_data?: string }[][] } } | undefined
+  const rows = msg?.reply_markup?.inline_keyboard ?? []
+  const done = action === 'keep' ? '💾 сохраним' : '🗑 удалим сегодня'
+  const newRows = rows.map(row => {
+    if (!row.some(b => b.callback_data?.endsWith(`:${token}`))) return row
+    const num = (row[0]?.text.match(/\d+/) ?? [''])[0]
+    return [{ text: `${num ? num + ' — ' : ''}${done}`, callback_data: 'bf:noop:' }]
+  })
+  await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: newRows } as never }).catch(() => {})
+  await ctx.answerCallbackQuery({ text: action === 'keep' ? 'Сохраню' : 'Удалю в течение часа' }).catch(() => {})
 })
 
 // Посты подключённых каналов → в сессию.

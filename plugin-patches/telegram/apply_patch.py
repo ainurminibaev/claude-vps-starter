@@ -14,7 +14,7 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MARKER = "[vps-starter patch: group-autojoin v3]"
+MARKER = "[vps-starter patch: group-autojoin v4]"
 
 # Блок обработчиков вставляется перед обработчиком permission-кнопок:
 # наш callback-обработчик должен стоять раньше, чтобы перехватить grp:* и
