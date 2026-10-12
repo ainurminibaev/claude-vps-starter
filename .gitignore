@@ -1,5 +1,6 @@
 .env
 *.log
+# legacy: data of the old whisper-asr container (removed from the template, see docs/03-voice.md)
 whisper-asr/cache/
 whisper-asr/models/
 __pycache__/

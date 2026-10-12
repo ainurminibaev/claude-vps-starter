@@ -111,8 +111,8 @@ sudo -u <u> tmux ls | grep claude-tg-<u>
 
 ## Что общее на VPS
 
-- Бинари: Docker, Bun, Claude CLI (`/usr/bin/claude`) ставятся глобально один раз.
-- Whisper-контейнер один (`127.0.0.1:9000`).
+- Бинари: Bun, Claude CLI (`/usr/bin/claude`) ставятся глобально один раз.
+- Распознавание речи одно на всех: роутер `/usr/local/bin/voice-to-text` и сервисы `gigaam-asr` (`127.0.0.1:9003`), `tatar-asr` (`127.0.0.1:9002`, опционально).
 - Watchdog один (`/root/claude-tg-watchdog.sh`), запускается из root-cron, умеет управлять tmux любого юзера через `sudo -u`.
 
 ## Шаг 1. Создать Linux-юзера

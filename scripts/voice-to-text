@@ -3,21 +3,23 @@
 #
 # Speech-to-text router for all bots on this VPS. Installed to /usr/local/bin
 # (not /root/...: /root is mode 700, other bot users could not execute it there).
+# Two local services, both systemd socket activation (start on the first request, exit when idle):
+#   gigaam-asr (127.0.0.1:9003, gigaam-asr/)  language ID (VoxLingua107) + Russian (GigaAM v3, with punctuation)
+#   tatar-asr  (127.0.0.1:9002, tatar-asr/)   Omnilingual 300M: Tatar, English, Arabic, ... (lowercase, no punctuation)
 #
-#   auto (default):
-#     Tatar service enabled  -> whisper /detect-language; if language is ru/en/ar
-#                               with confidence >= 0.80 -> whisper /asr in that
-#                               language, otherwise -> Tatar service (127.0.0.1:9002).
-#     Tatar service disabled -> straight to whisper language=ru (no detection,
-#                               same latency as the old whisper_via_api.sh).
-#   tt       : force Tatar service.
-#   ru|en|ar : force whisper with that language.
-# If the Tatar service fails or times out -> fallback to whisper language=ru.
-# stdout: transcript only. stderr: one short status line. Decisions -> syslog (tag voice-to-text).
+#   auto (default): language ID in gigaam-asr (/detect-language, ~0.3-2 s);
+#                   ru (= ru+be+uk) with confidence >= 0.60 -> GigaAM,
+#                   otherwise (tt, en, ar, ...) -> Omnilingual.
+#   ru            : force GigaAM.
+#   tt|en|ar      : force Omnilingual (no language hint there: one multilingual model).
+# Fallback: gigaam-asr down (language ID or GigaAM failed) -> Omnilingual for any language (it knows Russian too).
+# Only one service installed -> everything goes to it (GigaAM is Russian-only: other languages come out garbled).
+# Nothing works -> error on stderr, exit 1.
+# stdout: transcript only. stderr: one short status line per step. Decisions -> syslog (tag voice-to-text).
 #
-# Config: /etc/voice-to-text.conf (KEY=value lines, written by tatar-asr/install-tatar-asr.sh):
-#   TATAR_ENABLED=1   WHISPER_URL=...   TATAR_URL=...   TATAR_TIMEOUT=...
-#   WHISPER_TIMEOUT=...   VTT_CONF_MIN=0.80
+# Config: /etc/voice-to-text.conf (KEY=value lines, written by the installers):
+#   GIGAAM_ENABLED=1  GIGAAM_URL=...  TATAR_ENABLED=1  TATAR_URL=...
+#   LID_TIMEOUT=...  GIGAAM_TIMEOUT=...  TATAR_TIMEOUT=...  VTT_CONF_MIN_RU=0.60
 # Environment variables with the same names take precedence over the file.
 set -uo pipefail
 
@@ -26,19 +28,22 @@ if [ -r "$CONF_FILE" ]; then
   # parsed, not sourced: only known keys, no code execution
   while IFS='=' read -r k v; do
     case "$k" in
-      WHISPER_URL|TATAR_URL|TATAR_ENABLED|TATAR_TIMEOUT|WHISPER_TIMEOUT|VTT_CONF_MIN)
+      GIGAAM_URL|GIGAAM_ENABLED|TATAR_URL|TATAR_ENABLED|LID_TIMEOUT|GIGAAM_TIMEOUT|TATAR_TIMEOUT|VTT_CONF_MIN_RU)
         v="${v%%#*}"; v="${v//[[:space:]]/}"; v="${v#\"}"; v="${v%\"}"; v="${v#\'}"; v="${v%\'}"
         [ -z "${!k:-}" ] && printf -v "$k" '%s' "$v" ;;
     esac
   done < "$CONF_FILE"
 fi
 
-WHISPER_URL="${WHISPER_URL:-http://127.0.0.1:9000}"
+GIGAAM_URL="${GIGAAM_URL:-http://127.0.0.1:9003}"
 TATAR_URL="${TATAR_URL:-http://127.0.0.1:9002}"
+GIGAAM_ENABLED="${GIGAAM_ENABLED:-1}"
 TATAR_ENABLED="${TATAR_ENABLED:-0}"
+LID_TIMEOUT="${LID_TIMEOUT:-120}"
+GIGAAM_TIMEOUT="${GIGAAM_TIMEOUT:-600}"
 TATAR_TIMEOUT="${TATAR_TIMEOUT:-600}"
-WHISPER_TIMEOUT="${WHISPER_TIMEOUT:-600}"
-CONF_MIN="${VTT_CONF_MIN:-0.80}"
+# VoxLingua gives Russian recordings ru >= 0.99 and Tatar ones <= 0.05
+CONF_MIN_RU="${VTT_CONF_MIN_RU:-0.60}"
 TAG="[voice-to-text]"
 
 usage() { echo "usage: voice-to-text <audio-file> [--lang auto|ru|tt|en|ar]" >&2; exit 2; }
@@ -62,71 +67,78 @@ trap 'rm -rf "$TMP"' EXIT
 now() { date +%s.%N; }
 elapsed() { awk -v a="$1" -v b="$(now)" 'BEGIN{printf "%.1f", b-a}'; }
 note() { echo "$TAG $*" >&2; logger -t voice-to-text -- "user=$(id -un) file=$(basename -- "$FILE") $*" 2>/dev/null || true; }
-
-whisper_asr() {  # $1 = language
-  curl -sS --fail-with-body --max-time "$WHISPER_TIMEOUT" -X POST \
-    -F "audio_file=@${FILE}" \
-    "${WHISPER_URL}/asr?language=$1&output=txt&encode=true" -o "$TMP/out" 2>"$TMP/err"
-}
-
-tatar_asr() {
-  curl -sS --fail-with-body --max-time "$TATAR_TIMEOUT" -X POST \
-    -F "audio_file=@${FILE}" -D "$TMP/hdr" \
-    "${TATAR_URL}/asr" -o "$TMP/out" 2>"$TMP/err"
-}
-
+ge() { awk -v c="$1" -v m="$2" 'BEGIN{exit !(c+0 >= m+0)}'; }
+fmt2() { awk -v c="$1" 'BEGIN{printf "%.2f", c}'; }
+errtxt() { cat "$TMP/err" "$TMP/out" 2>/dev/null | head -c 200 | tr "\n" " "; }
 hdr() { tr -d '\r' < "$TMP/hdr" 2>/dev/null | awk -F': ' -v k="$1" 'tolower($1)==tolower(k){print $2}' | tail -1; }
+# cold start / queue info from X-Load-Wait / X-Queue-Wait headers (both services send them)
+waits() {
+  local lw qw e=""
+  lw="$(hdr X-Load-Wait)"; qw="$(hdr X-Queue-Wait)"
+  ge "${lw:-0}" 1.0 && e="cold start ${lw}s, "
+  ge "${qw:-0}" 1.0 && e="${e}queued ${qw}s, "
+  printf '%s' "$e"
+}
 
-DET="" CONF="" ROUTE=""
-if [ "$LANG_OPT" = "auto" ] && [ "$TATAR_ENABLED" != "1" ]; then
-  # no Tatar service on this server: skip detection, behave like plain whisper ru
-  ROUTE="ru"
-  PREFIX="lang=ru (default, tatar off)"
-elif [ "$LANG_OPT" = "auto" ]; then
-  if curl -sS --fail --max-time 120 -X POST -F "audio_file=@${FILE}" \
-       "${WHISPER_URL}/detect-language?encode=true" -o "$TMP/det" 2>"$TMP/err"; then
-    read -r DET CONF < <(python3 -c 'import json,sys
-d=json.load(open(sys.argv[1])); print(d.get("language_code","?"), d.get("confidence",0))' "$TMP/det" 2>/dev/null) || true
-  fi
-  DET="${DET:-?}" CONF="${CONF:-0}"
-  if [[ "$DET" =~ ^(ru|en|ar)$ ]] && awk -v c="$CONF" -v m="$CONF_MIN" 'BEGIN{exit !(c+0 >= m+0)}'; then
-    ROUTE="$DET"
-  else
-    ROUTE="tt"
-  fi
-  CONF_FMT="$(awk -v c="$CONF" 'BEGIN{printf "%.2f", c}')"
-  PREFIX="lang=$DET conf=$CONF_FMT"
-else
-  ROUTE="$LANG_OPT"
-  PREFIX="lang=$LANG_OPT (forced)"
-fi
+post() {  # $1 = url, $2 = timeout; body -> $TMP/out, headers -> $TMP/hdr, curl errors -> $TMP/err
+  rm -f "$TMP/out" "$TMP/hdr" "$TMP/err"
+  curl -sS --fail-with-body --max-time "$2" -X POST -F "audio_file=@${FILE}" -D "$TMP/hdr" "$1" \
+    -o "$TMP/out" 2>"$TMP/err"
+}
 
-T0="$(now)"
-if [ "$ROUTE" = "tt" ]; then
-  if tatar_asr; then
-    LW="$(hdr X-Load-Wait)"; IS="$(hdr X-Infer-Sec)"; QW="$(hdr X-Queue-Wait)"
-    EXTRA=""
-    awk -v x="${LW:-0}" 'BEGIN{exit !(x+0 >= 1.0)}' && EXTRA="cold start ${LW}s, "
-    awk -v x="${QW:-0}" 'BEGIN{exit !(x+0 >= 1.0)}' && EXTRA="${EXTRA}queued ${QW}s, "
-    note "$PREFIX → tatar (${EXTRA}infer ${IS:-?}s, total $(elapsed "$T0")s)"
-    cat "$TMP/out"
-    exit 0
+# Engines: on success print the transcript to stdout, log, return 0.
+run_gigaam() {
+  local t0; t0="$(now)"
+  if post "${GIGAAM_URL}/asr?language=ru" "$GIGAAM_TIMEOUT"; then
+    note "$PREFIX → gigaam ($(waits)infer $(hdr X-Infer-Sec)s, total $(elapsed "$t0")s)"
+    cat "$TMP/out"; return 0
   fi
-  ERR="$(head -c 200 "$TMP/err" 2>/dev/null | tr '\n' ' ')"
-  note "$PREFIX → tatar FAILED after $(elapsed "$T0")s (${ERR:-no details}) → fallback whisper ru"
-  ROUTE="ru"; T0="$(now)"
-  if whisper_asr ru; then
-    note "fallback whisper ru done ($(elapsed "$T0")s)"
-    cat "$TMP/out"; exit 0
+  note "$PREFIX → gigaam FAILED after $(elapsed "$t0")s ($(errtxt))"; return 1
+}
+run_tatar() {
+  local t0; t0="$(now)"
+  if post "${TATAR_URL}/asr" "$TATAR_TIMEOUT"; then
+    note "$PREFIX → omnilingual ($(waits)infer $(hdr X-Infer-Sec)s, total $(elapsed "$t0")s)"
+    cat "$TMP/out"; return 0
   fi
-  note "fallback whisper ru FAILED: $(head -c 200 "$TMP/err" "$TMP/out" 2>/dev/null | tr '\n' ' ')"
+  note "$PREFIX → omnilingual FAILED after $(elapsed "$t0")s ($(errtxt))"; return 1
+}
+
+if [ "$GIGAAM_ENABLED" != 1 ] && [ "$TATAR_ENABLED" != 1 ]; then
+  note "ERROR: no speech service installed — run gigaam-asr/install-gigaam-asr.sh (claude-vps-starter)"
   exit 1
 fi
 
-if whisper_asr "$ROUTE"; then
-  note "$PREFIX → whisper $ROUTE ($(elapsed "$T0")s)"
-  cat "$TMP/out"
-  exit 0
+# choose the engine
+if [ "$GIGAAM_ENABLED" != 1 ]; then
+  ENGINE="tatar"; PREFIX="lang=$LANG_OPT (gigaam off)"
+elif [ "$LANG_OPT" = "auto" ] && [ "$TATAR_ENABLED" != 1 ]; then
+  # GigaAM is the only engine: language ID would not change anything
+  ENGINE="gigaam"; PREFIX="lang=ru (default, tatar off)"
+elif [ "$LANG_OPT" = "auto" ]; then
+  ENGINE="tatar"
+  T0="$(now)"
+  if post "${GIGAAM_URL}/detect-language" "$LID_TIMEOUT" && \
+     read -r DET CONF RU < <(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1])); print(d["language_code"], d.get("confidence",0), d.get("ru",0))' "$TMP/out" 2>/dev/null); then
+    LW="$(hdr X-Load-Wait)"; if ge "${LW:-0}" 1.0; then LW=", cold start ${LW}s"; else LW=""; fi
+    PREFIX="lang=$DET conf=$(fmt2 "$CONF") ru=$(fmt2 "$RU") (lid $(elapsed "$T0")s${LW})"
+    ge "$RU" "$CONF_MIN_RU" && ENGINE="gigaam"
+  else
+    PREFIX="lang=? (language ID FAILED after $(elapsed "$T0")s: $(errtxt))"
+  fi
+elif [ "$LANG_OPT" = ru ] || [ "$TATAR_ENABLED" != 1 ]; then
+  ENGINE="gigaam"; PREFIX="lang=$LANG_OPT (forced)"
+  [ "$LANG_OPT" != ru ] && PREFIX="$PREFIX, tatar off — GigaAM is Russian-only"
+else
+  ENGINE="tatar"; PREFIX="lang=$LANG_OPT (forced)"
 fi
-note "$PREFIX → whisper $ROUTE FAILED: $(head -c 200 "$TMP/err" "$TMP/out" 2>/dev/null | tr '\n' ' ')"
+
+if [ "$ENGINE" = gigaam ]; then
+  run_gigaam && exit 0
+  [ "$TATAR_ENABLED" = 1 ] || { note "ERROR: gigaam-asr failed; check: systemctl status gigaam-asr.socket"; exit 1; }
+  PREFIX="$PREFIX, fallback"
+fi
+run_tatar && exit 0
+note "ERROR: speech recognition failed — check: systemctl status gigaam-asr.socket tatar-asr.socket; journalctl -u gigaam-asr -u tatar-asr -n 50"
 exit 1

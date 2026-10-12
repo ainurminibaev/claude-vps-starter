@@ -3,13 +3,13 @@
 #
 # Installs a small HTTP service on 127.0.0.1:9002 with the open model
 # aadel4/omniASR-CTC-300M-v2 (Apache-2.0), quantized to int8 for CPU.
-# The router /usr/local/bin/voice-to-text sends everything that Whisper does not
-# confidently recognise as ru/en/ar to this service.
+# The router /usr/local/bin/voice-to-text sends everything that the language ID in gigaam-asr
+# (gigaam-asr/install-gigaam-asr.sh) does not recognise as Russian to this service.
 #
 # Usage:
 #   sudo tatar-asr/install-tatar-asr.sh                 # install / update (idempotent)
 #   sudo tatar-asr/install-tatar-asr.sh --force-model   # re-download and re-quantize the model
-#   sudo tatar-asr/install-tatar-asr.sh --uninstall     # remove service, user, files; router back to whisper-only
+#   sudo tatar-asr/install-tatar-asr.sh --uninstall     # remove service, user, files; router back to GigaAM-only
 #
 # Overridable via environment:
 #   INSTALL_DIR=/opt/tatar-asr   PORT=9002   SVC_USER=tatar-asr
@@ -78,7 +78,7 @@ if [[ "$MODE" == uninstall ]]; then
   rm -f "$UNIT_DIR/tatar-asr.socket" "$UNIT_DIR/tatar-asr.service"
   systemctl daemon-reload
   [ -f "$VTT_CONF" ] && set_conf TATAR_ENABLED 0
-  echo "[+] service removed, router switched to whisper-only (TATAR_ENABLED=0 in $VTT_CONF)"
+  echo "[+] service removed, router switched to GigaAM-only (TATAR_ENABLED=0 in $VTT_CONF)"
   if [ -d "$INSTALL_DIR" ]; then
     rm -rf "$INSTALL_DIR"
     echo "[+] removed $INSTALL_DIR"
@@ -263,6 +263,6 @@ else
 fi
 echo
 echo "Done. The service stays loaded for 15 min and then exits; the next request starts it again."
-echo "Try:   voice-to-text /path/to/voice.oga        (auto: ru/en/ar -> whisper, rest -> Tatar)"
+echo "Try:   voice-to-text /path/to/voice.oga        (auto: ru -> GigaAM, rest -> Omnilingual)"
 echo "       voice-to-text /path/to/voice.oga --lang tt"
 echo "Logs:  journalctl -t voice-to-text -n 20   |   journalctl -u tatar-asr.service -n 50"

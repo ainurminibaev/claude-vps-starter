@@ -1,0 +1,43 @@
+# Installed by install-gigaam-asr.sh (paths/port/user are substituted there if overridden).
+# Code: /opt/gigaam-asr/server.py, models: /opt/gigaam-asr/models (lid.onnx, lid_labels.txt, gigaam.int8.onnx,
+# tokenizer.model — built by install-gigaam-asr.sh from checksum-verified upstream weights). No torch at runtime.
+[Unit]
+Description=GigaAM ASR: language ID (VoxLingua107) + Russian (GigaAM v3 e2e int8), started on demand, exits when idle
+Documentation=file:/opt/gigaam-asr/server.py
+Requires=gigaam-asr.socket
+After=gigaam-asr.socket network.target
+
+[Service]
+Type=simple
+User=gigaam-asr
+Group=gigaam-asr
+ExecStart=/opt/gigaam-asr/venv/bin/python /opt/gigaam-asr/server.py
+Environment=MODEL_DIR=/opt/gigaam-asr/models
+Environment=PORT=9003
+# process exits after IDLE_TIMEOUT_SEC idle (models load in ~1-2 s on the next request)
+Environment=IDLE_TIMEOUT_SEC=600
+Environment=NUM_THREADS=2
+Environment=OMP_NUM_THREADS=2
+Environment=MALLOC_ARENA_MAX=2
+Environment=MAX_AUDIO_SEC=1800
+Environment=HOME=/tmp
+Environment=PYTHONWARNINGS=ignore
+Environment=PYTHONUNBUFFERED=1
+Nice=5
+CPUWeight=80
+# ~400 MB RSS loaded, ~660 MB peak during inference
+MemoryMax=1000M
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+Also=gigaam-asr.socket

@@ -43,8 +43,9 @@ claude --resume <uuid> --model opus --permission-mode auto --effort high \
 | `scripts/bigfile-retention.py` → `/usr/local/bin/` | Большие старые файлы (>300 МБ, не менялись 7 дней): по понедельникам 06:00 UTC владельцу приходит сообщение от его бота с кнопками «Сохранить / Удалить сейчас»; без ответа 3 дня — в корзину `/var/trash`, через 7 дней — окончательно. Кэши, venv, transcripts, веса моделей и открытые процессами файлы не трогает. Кнопки обрабатывает патч плагина |
 | `scripts/bot-restart.sh` → `/usr/local/bin/` | Безопасный перезапуск одного бота: ждёт 30 с тишины, гасит мягко, поднимает через watchdog |
 | `$HOME/.claude/channels/telegram/group-context.json`, `topics.json` | Буфер последних сообщений групп (контекст) и названия тем форумов |
-| `scripts/voice-to-text` → `/usr/local/bin/` | Общий роутер расшифровки голоса для всех ботов: Whisper (ru/en/ar) или татарский сервис. Настройки `/etc/voice-to-text.conf`, решения в `journalctl -t voice-to-text`. `whisper_via_api.sh` — старое имя, обёртка над ним |
-| `tatar-asr/` → `/opt/tatar-asr/` + `tatar-asr.socket`/`.service` | Опционально: распознавание татарского на `127.0.0.1:9002` (omniASR 300M int8). Запускается по первому запросу, выгружается через 15 мин простоя. Ставится `install-tatar-asr.sh`, см. docs/03 |
+| `scripts/voice-to-text` → `/usr/local/bin/` | Общий роутер расшифровки голоса для всех ботов: язык → русский в GigaAM (`gigaam-asr`), остальное в Omnilingual (`tatar-asr`). Настройки `/etc/voice-to-text.conf`, решения в `journalctl -t voice-to-text`. `whisper_via_api.sh` — старое имя, обёртка над ним |
+| `gigaam-asr/` → `/opt/gigaam-asr/` + `gigaam-asr.socket`/`.service` | Определение языка (VoxLingua107) + русский (GigaAM v3, с пунктуацией) на `127.0.0.1:9003`, ONNX без torch. Запускается по первому запросу, выгружается через 10 мин простоя. Ставится `install-gigaam-asr.sh` (его зовёт `install.sh`): веса из первоисточников со сверкой sha256, см. docs/03 |
+| `tatar-asr/` → `/opt/tatar-asr/` + `tatar-asr.socket`/`.service` | Опционально: татарский, английский, арабский и др. на `127.0.0.1:9002` (omniASR 300M int8). Запускается по первому запросу, выгружается через 15 мин простоя. Ставится `install-tatar-asr.sh`, см. docs/03 |
 
 ## Грабли (всё это уже случалось)
 
