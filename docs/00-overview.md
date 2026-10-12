@@ -38,6 +38,7 @@ claude --resume <uuid> --model opus --permission-mode auto --effort high \
 | `scripts/claude-cli-update.sh` → `/usr/local/bin/` | Еженедельное обновление CLI с бэкапом прошлых версий в `/root/backups/` |
 | `plugin-patches/telegram/` | Патч telegram-плагина: автоподключение групп и каналов, режимы, контекст, названия тем. `apply_patch.py` вставляет `group-autojoin.ts` по якорям, идемпотентно, оригинал хранит в `server.ts.vps-orig` |
 | `scripts/tg-plugin-sync.sh` → `/usr/local/bin/` | Без аргументов — еженедельно: `claude plugin update` у всех ботов + патч + отчёт в Telegram, если что-то обновилось или патч не встал. `--patch <user>` — только патч; его зовёт watchdog перед каждым стартом сессии |
+| `image-gen/` → `imagegen.service`, `/usr/local/bin/image-gen` | Генерация картинок для всех ботов через Codex на подписке ChatGPT. Токен только у пользователя `imagegen`, доступ — группа `imagegen-users`, журнал `/var/log/imagegen/requests.log`. Подробно — `image-gen/README.md` |
 | `scripts/bot-restart.sh` → `/usr/local/bin/` | Безопасный перезапуск одного бота: ждёт 30 с тишины, гасит мягко, поднимает через watchdog |
 | `$HOME/.claude/channels/telegram/group-context.json`, `topics.json` | Буфер последних сообщений групп (контекст) и названия тем форумов |
 | `scripts/voice-to-text` → `/usr/local/bin/` | Общий роутер расшифровки голоса для всех ботов: Whisper (ru/en/ar) или татарский сервис. Настройки `/etc/voice-to-text.conf`, решения в `journalctl -t voice-to-text`. `whisper_via_api.sh` — старое имя, обёртка над ним |

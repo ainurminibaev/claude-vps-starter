@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# codex-image — генерация картинки через Codex CLI (image_generation) на подписке ChatGPT.
+# Бэкенд сервиса imagegen.service (см. README.md рядом). Зовётся сервером, не ботами напрямую.
+#
+# Usage: image-gen "<prompt>" -o /abs/out.png [--ref img.jpg]... [--size WxH] [--timeout SEC]
+# stdout: путь к PNG при успехе. Коды: 0 ок, 2 аргументы, 3 не залогинен, 4 лимит, 5 таймаут, 1 прочее.
+set -euo pipefail
+CODEX="${CODEX_BIN:-$(command -v codex || echo "$HOME/.npm-global/bin/codex")}"
+
+prompt=""; out=""; size=""; tmo=900; refs=(); model=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--out) out="$2"; shift 2 ;;
+    --ref) refs+=("$(realpath "$2")"); shift 2 ;;
+    --size) size="$2"; shift 2 ;;
+    --timeout) tmo="$2"; shift 2 ;;
+    --model) model="$2"; shift 2 ;;
+    -h|--help) sed -n 2,7p "$0"; exit 0 ;;
+    *) if [[ -z "$prompt" ]]; then prompt="$1"; shift; else echo "image-gen: unknown arg: $1" >&2; exit 2; fi ;;
+  esac
+done
+[[ -n "$prompt" && -n "$out" ]] || { echo 'usage: image-gen "<prompt>" -o out.png [--ref img]... [--size WxH]' >&2; exit 2; }
+[[ -x "$CODEX" ]] || { echo "image-gen: codex not found" >&2; exit 1; }
+"$CODEX" login status 2>&1 | grep -qi 'logged in' || { echo "image-gen: codex не залогинен (codex login --device-auth)" >&2; exit 3; }
+
+out_dir="$(cd "$(dirname "$out")" && pwd)"; out="$out_dir/$(basename "$out")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/image-gen.XXXXXX")"; log="$work.log"
+img_args=(); ref_line=""
+model_args=(); [[ -n "$model" ]] && model_args=(-m "$model")
+if ((${#refs[@]})); then
+  for r in "${refs[@]}"; do [[ -f "$r" ]] || { echo "image-gen: ref not found: $r" >&2; exit 2; }; img_args+=(-i "$r"); done
+  ref_line="
+REFERENCE IMAGES: attached (${#refs[@]}). Use them as visual reference for the people/objects/style as the prompt says (pass them to the image tool as input images if supported)."
+fi
+size_line=""; [[ -n "$size" ]] && size_line="
+SIZE: ${size}"
+
+full="Use your image_generation tool to create an image.
+
+PROMPT: ${prompt}${size_line}${ref_line}
+
+Requirements:
+- You MUST call the image_generation tool. Do NOT draw it with Python/PIL/SVG or fabricate a PNG any other way.
+- Save the resulting PNG as out.png in the current working directory (relative path out.png).
+- Reply with only: out.png"
+
+set +e
+timeout "$tmo" "$CODEX" exec --skip-git-repo-check --ephemeral --disable memories -s "${CODEX_SANDBOX:-workspace-write}" -C "$work" "${model_args[@]}" "${img_args[@]}" "$full" </dev/null >"$log" 2>&1
+rc=$?
+set -e
+img="$work/out.png"; [[ -f "$img" ]] || img="$(ls -t "$work"/*.png 2>/dev/null | head -n1 || true)"
+if [[ -n "$img" && -f "$img" ]]; then cp "$img" "$out"; rm -rf "$work" "$log"; echo "$out"; exit 0; fi
+if ((rc==124)); then echo "image-gen: timeout ${tmo}s (log: $log)" >&2; exit 5; fi
+if grep -qiE 'usage limit|rate limit|429|quota|limit reached' "$log"; then echo "image-gen: лимит подписки исчерпан" >&2; tail -n 5 "$log" >&2; exit 4; fi
+echo "image-gen: картинка не получена (rc=$rc). Хвост лога:" >&2; tail -n 30 "$log" >&2; echo "(log: $log)" >&2; exit 1
