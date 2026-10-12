@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""image-gen — сгенерировать картинку через общий сервис (Codex на подписке ChatGPT).
+
+Usage: image-gen "<prompt>" -o /abs/out.png [--ref img.jpg]... (до 8) [--size WxH] [--timeout SEC]
+
+Пока идёт генерация, в stderr построчно печатается статус (очередь, попытка, модель,
+повтор). В stdout — путь к готовому PNG. Коды выхода:
+  0 ок · 2 неверные аргументы / нет доступа · 3 сервис не залогинен в ChatGPT
+  4 лимит подписки исчерпан · 5 таймаут · 1 прочее
+Обычно 1–6 минут; при перегрузке OpenAI сервис сам повторяет и меняет модель.
+Доступ к сервису — членство в группе imagegen-users.
+"""
+import argparse
+import base64
+import http.client
+import json
+import os
+import socket
+import sys
+import time
+
+SOCKET_PATH = os.environ.get("IMAGEGEN_SOCKET", "/run/imagegen/api.sock")
+
+
+class UnixConnection(http.client.HTTPConnection):
+    def __init__(self, path: str, timeout: float):
+        super().__init__("localhost", timeout=timeout)
+        self.unix_path = path
+
+    def connect(self) -> None:
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self.unix_path)
+
+
+def status(msg: str) -> None:
+    print(f"image-gen: {msg}", file=sys.stderr, flush=True)
+
+
+def fail(msg: str, code: int) -> None:
+    status(msg)
+    sys.exit(code)
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="image-gen")
+    p.add_argument("prompt")
+    p.add_argument("-o", "--out", required=True)
+    p.add_argument("--ref", action="append", default=[])
+    p.add_argument("--size", default="")
+    p.add_argument("--timeout", type=int, default=900, help="общий бюджет времени, сек")
+    try:
+        a = p.parse_args()
+    except SystemExit:
+        sys.exit(2)
+
+    refs = []
+    for r in a.ref:
+        try:
+            with open(r, "rb") as f:
+                refs.append(base64.b64encode(f.read()).decode())
+        except OSError as e:
+            fail(f"не читается референс {r}: {e}", 2)
+
+    out = os.path.abspath(a.out)
+    if not os.path.isdir(os.path.dirname(out)):
+        fail(f"нет каталога для {out}", 2)
+
+    body = json.dumps({"prompt": a.prompt, "size": a.size, "refs": refs, "timeout": a.timeout})
+    # Ждём дольше бюджета: перед нами может быть очередь чужих генераций.
+    conn = UnixConnection(SOCKET_PATH, timeout=a.timeout * 3 + 300)
+    started = time.time()
+    try:
+        conn.request("POST", "/generate", body=body, headers={"Content-Type": "application/json"})
+        resp = conn.getresponse()
+    except PermissionError:
+        fail("нет доступа к сервису (нужно членство в группе imagegen-users)", 2)
+    except FileNotFoundError:
+        fail(f"сервис не запущен ({SOCKET_PATH} нет)", 1)
+    except OSError as e:
+        fail(f"ошибка связи с сервисом: {e}", 1)
+
+    if resp.status != 200:
+        try:
+            err = json.loads(resp.read())
+            fail(err.get("error", "ошибка"), int(err.get("code", 1)))
+        except (ValueError, TypeError):
+            fail(f"HTTP {resp.status}", 1)
+
+    try:
+        for raw in resp:
+            line = raw.decode().strip()
+            if not line:
+                continue
+            ev = json.loads(line)
+            kind = ev.get("event")
+            if kind == "queued":
+                status(f"в очереди, перед вами {ev['ahead']}")
+            elif kind == "attempt":
+                status(f"попытка {ev['n']}/{ev['max']}, модель {ev['model']} — генерирую")
+            elif kind == "retry":
+                status(f"{ev['reason']} — через {ev['wait']} с пробую {ev['next_model']}")
+            elif kind == "done":
+                with open(out, "wb") as f:
+                    f.write(base64.b64decode(ev["image_b64"]))
+                status(f"готово за {ev['seconds']} с (модель {ev['model']}, попытка {ev['attempt']})")
+                print(out)
+                return
+            elif kind == "error":
+                fail(ev.get("error", "ошибка"), int(ev.get("code", 1)))
+    except (socket.timeout, TimeoutError):
+        fail(f"таймаут ожидания сервиса ({int(time.time() - started)} с)", 5)
+    except (OSError, ValueError) as e:
+        fail(f"обрыв связи с сервисом: {e}", 1)
+    fail("сервис закрыл соединение без результата", 1)
+
+
+if __name__ == "__main__":
+    main()

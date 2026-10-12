@@ -16,7 +16,11 @@ h=$(getent passwd "$u" | cut -d: -f6)
 
 waited=0
 while :; do
-  busy=$($run tmux capture-pane -p -t "$s" 2>/dev/null | tail -3 | grep -c "esc to interrupt")
+  # Занят = идёт ход («esc to interrupt») ИЛИ живут фоновые агенты/шеллы:
+  # в футере «N shells», «↓ to manage», ниже список агентов «◯ …». Главная сессия
+  # при этом выглядит свободной, а рестарт обрывает фоновую работу.
+  busy=$($run tmux capture-pane -p -t "$s" 2>/dev/null | tail -15 \
+    | grep -cE "esc to interrupt|to manage|[0-9]+ shells?|^\s*◯ ")
   f=$(ls -t "$h"/.claude/projects/*/*.jsonl 2>/dev/null | head -1)
   idle=$(( $(date +%s) - $(stat -c %Y "$f" 2>/dev/null || echo 0) ))
   [ "$busy" = 0 ] && [ "$idle" -ge "$QUIET" ] && break
