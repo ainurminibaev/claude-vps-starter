@@ -208,6 +208,14 @@ for entry in "${SESSIONS[@]}"; do
     echo "$(date -Iseconds) [$SESSION] chose resume-from-summary" >> "$LOG"
     continue
   fi
+  # Pattern 9: «Teach auto mode about your environment?» (CLI 2.1.2xx) — предлагает
+  # просканировать проекты и историю шелла. В TG-сессии ответить некому, бот висит
+  # и не видит сообщений. Отказываемся (Esc): историю шелла не отдаём.
+  if echo "$pane" | grep -qE "Teach auto mode about your environment"; then
+    $TMUX_CMD send-keys -t "$SESSION" Escape 2>/dev/null
+    echo "$(date -Iseconds) [$SESSION] dismissed teach-auto-mode dialog" >> "$LOG"
+    continue
+  fi
   # Pattern 8: AskUserQuestion / interactive select modal (TUI-only, не для TG)
   if echo "$pane" | grep -qE "Enter to select.*Esc to cancel|Enter to confirm.*Esc to cancel"; then
     $TMUX_CMD send-keys -t "$SESSION" Escape 2>/dev/null
