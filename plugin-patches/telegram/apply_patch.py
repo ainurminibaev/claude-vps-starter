@@ -14,7 +14,7 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MARKER = "[vps-starter patch: group-autojoin v4]"
+MARKER = "[vps-starter patch: group-autojoin v5]"
 
 # Блок обработчиков вставляется перед обработчиком permission-кнопок:
 # наш callback-обработчик должен стоять раньше, чтобы перехватить grp:* и
@@ -37,6 +37,21 @@ META_ADD = (
 ANCHOR_CONTENT = "      content: text,\n"
 CONTENT_NEW = "      content: vpsWithContext(ctx, text),\n"
 
+# Доп. инструменты (edit_caption, forward/copy_message, post_to_topic): определения —
+# ДО списка инструментов (плагин делает await mcp.connect раньше основного блока),
+# добавление в список и обработка в switch.
+ANCHOR_TOOLS_DEF = "mcp.setRequestHandler(ListToolsRequestSchema, async () => ({\n"
+ANCHOR_TOOLS_LIST = "  ],\n}))\n\nmcp.setRequestHandler(CallToolRequestSchema"
+TOOLS_LIST_NEW = "    ...VPS_EXTRA_TOOLS,\n  ],\n}))\n\nmcp.setRequestHandler(CallToolRequestSchema"
+ANCHOR_CALL = "      default:\n        return {\n          content: [{ type: 'text', text: `unknown tool: ${req.params.name}` }],"
+CALL_ADD = (
+    "      case 'edit_caption':\n"
+    "      case 'forward_message':\n"
+    "      case 'copy_message':\n"
+    "      case 'post_to_topic':\n"
+    "        return await vpsCallExtra(req.params.name, args)\n"
+)
+
 
 def main(path: str) -> int:
     orig = path + ".vps-orig"
@@ -50,7 +65,8 @@ def main(path: str) -> int:
     if "[vps-starter patch:" in current and os.path.exists(orig):
         current = open(orig, encoding="utf-8").read()
 
-    for anchor, name in ((ANCHOR_BLOCK, "block"), (ANCHOR_META, "meta"), (ANCHOR_CONTENT, "content")):
+    for anchor, name in ((ANCHOR_BLOCK, "block"), (ANCHOR_META, "meta"), (ANCHOR_CONTENT, "content"),
+                         (ANCHOR_TOOLS_DEF, "tools-def"), (ANCHOR_TOOLS_LIST, "tools-list"), (ANCHOR_CALL, "call")):
         if current.count(anchor) != 1:
             print(f"FAIL якорь '{name}' найден {current.count(anchor)} раз: {path}")
             return 2
@@ -59,6 +75,10 @@ def main(path: str) -> int:
     patched = current.replace(ANCHOR_BLOCK, block + "\n" + ANCHOR_BLOCK, 1)
     patched = patched.replace(ANCHOR_META, META_ADD, 1)
     patched = patched.replace(ANCHOR_CONTENT, CONTENT_NEW, 1)
+    extra = open(os.path.join(HERE, "extra-tools.ts"), encoding="utf-8").read()
+    patched = patched.replace(ANCHOR_TOOLS_DEF, extra + ANCHOR_TOOLS_DEF, 1)
+    patched = patched.replace(ANCHOR_TOOLS_LIST, TOOLS_LIST_NEW, 1)
+    patched = patched.replace(ANCHOR_CALL, CALL_ADD + ANCHOR_CALL, 1)
 
     if not os.path.exists(orig):
         shutil.copy2(path, orig)

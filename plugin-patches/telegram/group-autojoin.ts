@@ -1,4 +1,4 @@
-// ── [vps-starter patch: group-autojoin v4] ─────────────────────────────────
+// ── [vps-starter patch: group-autojoin v5] ─────────────────────────────────
 // Источник: claude-vps-starter/plugin-patches/telegram/. Накладывается заново
 // при каждом старте сессии (watchdog), потому что кэш плагина перезаписывается
 // при обновлениях.
@@ -94,8 +94,24 @@ async function vpsAnnounce(chat: { id: number; type: string }, owner: { id: numb
   await vpsSendSettings(String(owner.id), String(chat.id), p)
 }
 
+// Администраторы сервера есть в allowlist каждого бота, но служебные уведомления
+// о группах им не нужны — пишем владельцу бота. Список — в /etc/claude-tg/admins
+// (по id в строке), чтобы не держать личные id в коде. Если кроме админа никого
+// нет (бот самого админа) — пишем ему.
+function vpsOwners(access: Access): string[] {
+  let admins: string[] = []
+  try {
+    admins = readFileSync('/etc/claude-tg/admins', 'utf8').split(/\s+/).filter(Boolean)
+  } catch {}
+  const owners = access.allowFrom.filter(id => !admins.includes(id))
+  return owners.length ? owners : access.allowFrom
+}
+
+// Добавил анонимный администратор группы — Telegram подставляет служебного бота.
+const VPS_ANON_ADMIN_ID = 1087968824
+
 async function vpsNotifyOwners(access: Access, text: string, keyboard?: InlineKeyboard): Promise<void> {
-  for (const owner of access.allowFrom) {
+  for (const owner of vpsOwners(access)) {
     await bot.api.sendMessage(owner, text, keyboard ? { reply_markup: keyboard } : {}).catch(() => {})
   }
 }
@@ -250,7 +266,9 @@ bot.on('my_chat_member', async ctx => {
     .text('🚪 Выйти', `grp:leave:${id}`)
   await vpsNotifyOwners(
     access,
-    `Меня добавил в ${where} «${title}» ${vpsUserLabel(actor)} — не ты. Пока я там молчу.`,
+    actor.id === VPS_ANON_ADMIN_ID
+      ? `Меня добавили в ${where} «${title}» от имени анонимного администратора — проверить, что это ты, я не могу. Пока я там молчу. Подключить?`
+      : `Меня добавил в ${where} «${title}» ${vpsUserLabel(actor)} — не ты. Пока я там молчу.`,
     keyboard,
   )
 })
