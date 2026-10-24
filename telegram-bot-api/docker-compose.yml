@@ -1,0 +1,33 @@
+# Общий локальный сервер Telegram Bot API для всех ботов VPS.
+# Лимиты: скачивание и отправка файлов до 2 ГБ (облачный API: 20 / 50 МБ).
+# Боты ходят на http://127.0.0.1:8081 (TELEGRAM_API_ROOT в ~/.claude/channels/telegram/.env).
+# Подробно — README.md рядом.
+services:
+  bot-api:
+    image: aiogram/telegram-bot-api:latest
+    container_name: telegram-bot-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      TELEGRAM_LOCAL: 1
+      TELEGRAM_STAT: 1
+    volumes:
+      - /var/lib/telegram-bot-api:/var/lib/telegram-bot-api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8082 >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Фронт: API проксирует в bot-api, /file/bot<token>/<путь> отдаёт с диска —
+  # в локальном режиме сам сервер файлы по HTTP не раздаёт.
+  web:
+    image: nginx:1.27-alpine
+    container_name: telegram-bot-api-web
+    restart: unless-stopped
+    depends_on: [bot-api]
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /var/lib/telegram-bot-api:/var/lib/telegram-bot-api:ro

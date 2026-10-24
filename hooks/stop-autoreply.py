@@ -147,10 +147,23 @@ def chunk_text(text, limit=TG_LIMIT):
     return out
 
 
+def api_root():
+    """Адрес Bot API: TELEGRAM_API_ROOT из .env плагина (локальный сервер), иначе облако."""
+    try:
+        for line in open(ENV_FILE):
+            if line.startswith("TELEGRAM_API_ROOT="):
+                root = line.strip().split("=", 1)[1].strip("'\"").rstrip("/")
+                if root:
+                    return root
+    except Exception:
+        pass
+    return "https://api.telegram.org"
+
+
 def send_message(token, chat_id, text):
     res = subprocess.run([
         "curl", "-s", "--max-time", "10",
-        f"https://api.telegram.org/bot{token}/sendMessage",
+        f"{api_root()}/bot{token}/sendMessage",
         "-d", f"chat_id={chat_id}",
         "--data-urlencode", f"text={text}",
     ], capture_output=True, text=True, timeout=15)

@@ -88,6 +88,19 @@ def bot_token(user: str) -> str:
     raise RuntimeError(f"no token for {user}")
 
 
+def api_root(user: str) -> str:
+    """Адрес Bot API бота: TELEGRAM_API_ROOT из .env (локальный сервер), иначе облако."""
+    try:
+        for line in open(f"{tg_dir(user)}/.env"):
+            if line.startswith("TELEGRAM_API_ROOT="):
+                root = line.split("=", 1)[1].strip().strip("'\"").rstrip("/")
+                if root:
+                    return root
+    except OSError:
+        pass
+    return "https://api.telegram.org"
+
+
 def owner_of(path: str, users: list) -> str:
     """Чей файл → какой бот спрашивает. Не из домашней папки бота — спрашивает root."""
     for u in users:
@@ -158,7 +171,7 @@ def send(user: str, chat: str, text: str, keyboard: list) -> None:
     body = {"chat_id": chat, "text": text}
     if keyboard:
         body["reply_markup"] = json.dumps({"inline_keyboard": keyboard})
-    args = ["curl", "-s", "--max-time", "20", f"https://api.telegram.org/bot{bot_token(user)}/sendMessage"]
+    args = ["curl", "-s", "--max-time", "20", f"{api_root(user)}/bot{bot_token(user)}/sendMessage"]
     for k, v in body.items():
         args += ["--data-urlencode", f"{k}={v}"]
     r = subprocess.run(args, capture_output=True, text=True)
