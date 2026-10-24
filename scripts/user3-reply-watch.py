@@ -79,6 +79,19 @@ def read_token():
     return None
 
 
+def api_root():
+    """Адрес Bot API: TELEGRAM_API_ROOT из .env плагина (локальный сервер), иначе облако."""
+    try:
+        for line in open(ENV_FILE):
+            if line.startswith("TELEGRAM_API_ROOT="):
+                root = line.strip().split("=", 1)[1].strip("\"'").rstrip("/")
+                if root:
+                    return root
+    except Exception:
+        pass
+    return "https://api.telegram.org"
+
+
 def send(text):
     token = read_token()
     if not token:
@@ -86,7 +99,7 @@ def send(text):
         return
     r = subprocess.run([
         "curl", "-s", "--max-time", "15",
-        "https://api.telegram.org/bot" + token + "/sendMessage",
+        api_root() + "/bot" + token + "/sendMessage",
         "-d", "chat_id=" + NOTIFY_CHAT,
         "--data-urlencode", "text=" + text,
     ], capture_output=True, text=True, timeout=25)
