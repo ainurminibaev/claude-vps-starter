@@ -82,6 +82,7 @@ tmux attach -t claude-tg
 - Фото от юзера приходит как `<channel ... image_path="...">` — Claude сам читает файл через `Read`.
 - Другие вложения — `attachment_file_id`, Claude качает их через `download_attachment`.
 - Ответ с файлом: `reply` принимает `files: ["/abs/path.png"]`.
+- Лимиты облачного Bot API: бот скачивает файлы до **20 МБ**, отправляет до **50 МБ**. Нужно больше — переведи бота на локальный сервер Bot API (до 2 ГБ): `telegram-bot-api/README.md`.
 
 ## Проверка
 
