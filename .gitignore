@@ -12,3 +12,4 @@ codex-backend/clients/
 codex-backend/client.env
 codex-backend/client-key
 codex-backend/*.tar.gz
+codex-backend/gateway-patches/bin/
