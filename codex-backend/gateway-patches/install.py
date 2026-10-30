@@ -44,7 +44,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--sha256", required=True)
-    parser.add_argument("--build-version", default="8.0.47-itab.2")
+    parser.add_argument("--build-version", default="8.0.47+codex-commentary.2")
     parser.add_argument("--wait-idle", type=int, default=180)
     args = parser.parse_args()
     data = args.binary.read_bytes()
