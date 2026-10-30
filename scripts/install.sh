@@ -52,6 +52,11 @@ fi
 # --- Watchdog ---
 
 echo "2. Watchdog:"
+# Root uses the launcher in both modes; the default remains ordinary Claude.
+install -m 755 "$REPO_DIR/scripts/claude-bot-launch.sh" /usr/local/bin/claude-bot-launch
+install -m 755 "$REPO_DIR/scripts/bot-backend.sh" /usr/local/bin/bot-backend
+install -d /usr/local/lib/claude-bot-cron
+install -m 644 "$REPO_DIR/scripts/claude-bot-env.sh" /usr/local/lib/claude-bot-cron/env.sh
 chmod +x "$WATCHDOG_SRC"
 if [ -L "$WATCHDOG_DST" ] || [ -f "$WATCHDOG_DST" ]; then
   echo "[ok] $WATCHDOG_DST уже существует"

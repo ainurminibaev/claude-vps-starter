@@ -37,7 +37,7 @@ pkill -9 -u "$u" -x claude 2>/dev/null
 pkill -9 -u "$u" -f "bun.real.*server.ts" 2>/dev/null
 sleep 2
 
-/root/claude-tg-watchdog.sh >/dev/null 2>&1
+CLAUDE_TG_ONLY_USER="$u" /root/claude-tg-watchdog.sh >/dev/null 2>&1
 for _ in $(seq 1 30); do
   p=$(pgrep -u "$u" -x claude | head -1)
   b=$(pgrep -u "$u" -f "bun.real.*server.ts" | head -1)

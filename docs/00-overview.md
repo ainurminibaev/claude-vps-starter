@@ -132,5 +132,8 @@ done
 
 ## Конкретный сервер
 
+Временная работа root-бота через Codex с возвратом на Claude:
+[08-codex-backend.md](08-codex-backend.md).
+
 Список ботов, владельцы, allowlist-ы и локальные скрипты конкретной установки
 не публикуются — они в реестре на самом сервере (`/root/projects/claude-tg-instances/registry.md`).
