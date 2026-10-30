@@ -34,6 +34,10 @@ Watchdog в cron каждую минуту проверяет, жива ли с�
 [`codex-backend/`](codex-backend/README.md); включение и обратное переключение —
 в [инструкции](docs/08-codex-backend.md).
 
+Для штатного Claude Code на Mac есть отдельный
+[переключатель Claude/Codex](desktop-codex-backend/README.md), сохраняющий бинарник,
+историю и настройки клиента.
+
 ## Quick-start (3 команды)
 
 На свежем Ubuntu 22.04 или 24.04:
