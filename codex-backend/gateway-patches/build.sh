@@ -20,6 +20,6 @@ git apply --check "$patch_dir/visible-commentary.patch"
 git apply "$patch_dir/visible-commentary.patch"
 "$go_bin" test ./internal/translator/codex/claude
 CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" "$go_bin" build -trimpath \
-  -ldflags '-s -w -X main.Version=8.0.47-itab.2 -X main.Commit=90c447d-commentary' \
+  -ldflags '-s -w -X main.Version=8.0.47+codex-commentary.2 -X main.Commit=90c447d-commentary' \
   -o "$output" ./cmd/server
 echo "Built $output"
