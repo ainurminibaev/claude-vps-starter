@@ -52,3 +52,23 @@ with tempfile.TemporaryDirectory(prefix="claude-backend-smoke-") as tmp:
     resumed = call(["-r", session, "What exact marker did I ask you to remember? Answer only with it."])
     assert marker in resumed["result"], "Resume lost the conversation marker"
     print("PASS native claude -r: same session and remembered conversation", flush=True)
+    # No --allowedTools: this must pass the actual Auto Mode classifier.
+    debug = root / "auto-debug.log"
+    auto_cli = [arg for arg in cli]
+    allowed_index = auto_cli.index("--allowedTools")
+    del auto_cli[allowed_index:allowed_index + 2]
+    result = subprocess.run(auto_cli + ["--permission-mode", "auto", "--debug-file", str(debug),
+                            "--no-session-persistence",
+                            "Use Bash to execute this Python command: python3 -c 'from pathlib import Path; Path(\"auto-proof.txt\").write_text(\"auto-classifier-ok\")'. Then read the file using Bash and report its contents."],
+                            env=env, cwd=root, text=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, timeout=180)
+    assert result.returncode == 0, "Auto Mode CLI failed"
+    data = json.loads(result.stdout)
+    assert not data.get("is_error"), "Auto Mode returned an error"
+    assert (root / "auto-proof.txt").read_text() == "auto-classifier-ok", "Auto Mode blocked actual Bash execution"
+    diagnostic = debug.read_text()
+    if "classifier_request_started" not in diagnostic:
+        backend.private_write(local.root / "last-smoke-debug.log", diagnostic)
+    assert "classifier_request_started" in diagnostic, "No actual classifier request was made"
+    assert "unknown provider" not in diagnostic and "temporarily unavailable" not in diagnostic, "Classifier unavailable"
+    print("PASS native Auto Mode: real classifier review and Bash execution without an allow rule", flush=True)
