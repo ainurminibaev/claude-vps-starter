@@ -23,6 +23,8 @@ LABEL = "com.ainur.claude-codex-proxy"
 URL = "http://127.0.0.1:18418"
 MODEL = "gpt-6.1-sol"
 ALIASES = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
+           # Auto Mode deliberately uses Sonnet 5 instead of the Sonnet 5.5 alias.
+           "claude-sonnet-5",
            "claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-5-20251101",
            "claude-sonnet-4-5-20250929", "claude-haiku-4-5-20251001"]
 MANAGED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
@@ -106,7 +108,7 @@ class Backend:
             req = urllib.request.Request(URL + "/v1/models", headers={"Authorization": "Bearer " + self.key()})
             with urllib.request.urlopen(req, timeout=2) as response:
                 ids = {item["id"] for item in json.load(response)["data"]}
-            return MODEL in ids and set(ALIASES[:3]) <= ids
+            return MODEL in ids and set(ALIASES) <= ids
         except (OSError, ValueError, KeyError, urllib.error.URLError):
             return False
 

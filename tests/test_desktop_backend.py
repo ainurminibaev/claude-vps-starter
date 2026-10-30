@@ -8,6 +8,9 @@ spec.loader.exec_module(backend)
 
 
 class Profiles(unittest.TestCase):
+    def test_classifier_alias_is_present(self):
+        self.assertIn("claude-sonnet-5", backend.ALIASES)
+
     def test_restore_original_and_keep_new_unrelated_settings(self):
         initial = {"model": "opus", "hooks": {"keep": True}, "env": {"ANTHROPIC_AUTH_TOKEN": "old", "OTHER": "1"}}
         active, state = backend.activate(initial, {}, backend.codex_env("local"))

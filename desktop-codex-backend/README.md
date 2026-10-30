@@ -13,7 +13,7 @@
 ```sh
 python3 desktop-codex-backend/claude-backend.py install
 claude-backend start
-# Необязательная живая проверка: две генерации, Bash и продолжение тестовой сессии.
+# Необязательная живая проверка: Bash, продолжение сессии и Auto Mode.
 python3 desktop-codex-backend/smoke.py
 claude-backend codex
 claude
@@ -87,4 +87,14 @@ Claude, сохрани приватную копию `~/.config/claude-backend/a
 Проверки профиля без запросов к модели:
 `python3 -m unittest discover -s tests -p 'test_desktop_backend.py'`.
 Живой `smoke.py` использует временные настройки и историю, проверяет реальный
-Bash-вызов и `-r`, затем удаляет только свою тестовую папку.
+Bash-вызов, `-r` и отдельную проверку Auto Mode без разрешающего правила Bash,
+затем удаляет только свою тестовую папку.
+
+Auto Mode использует отдельный `claude-sonnet-5`, даже когда основная модель
+и Sonnet-алиас настроены на версию 5.5. Этот ID также направляется на Codex;
+классификатор выполняет настоящий запрос к модели, без подстановки разрешений.
+Ошибка `unknown provider for model claude-sonnet-5` в журнале означает, что
+конфигурацию шлюза нужно обновить повторным `install`. Нативные read-only
+инструменты и MCP-инструменты context-mode проходят разные проверки:
+`ctx_execute` и `ctx_batch_execute` могут выполнять код и требуют классификатора.
+Строка `SendFeedback(...)` в интерфейсе — действие клиента, а не ошибка хука.
