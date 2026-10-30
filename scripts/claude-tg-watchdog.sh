@@ -75,16 +75,30 @@ restart_session() {
 
   if [[ "$USER" == "root" ]]; then
     tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-      "export PATH=/root/.bun/bin:\$PATH && export DISABLE_AUTOUPDATER=1 && { [ -f /root/.claude/oauth-token-env ] && . /root/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --model opus --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
+      "export PATH=/root/.bun/bin:\$PATH && export DISABLE_AUTOUPDATER=1 && { [ -f /root/.claude/oauth-token-env ] && . /root/.claude/oauth-token-env || true; } && cd $CWD && /usr/local/bin/claude-bot-launch $FLAG --model opus --permission-mode auto --effort high --debug --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug.log"
     sleep 2
     tmux pipe-pane -t "$SESSION" -o "cat >> /var/log/claude-tg-pane.log"
   else
-    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && { [ -f \$HOME/.claude/oauth-token-env ] && . \$HOME/.claude/oauth-token-env || true; } && cd $CWD && claude $FLAG --model opus --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official 2>>/var/log/claude-tg-debug-$USER.log'"
+    local BOT_CLI=claude
+    if [[ -f "$HOME_DIR/.claude/model-backend" ]]; then
+      BOT_CLI=/usr/local/bin/claude-bot-launch
+    fi
+    sudo -u "$USER" bash -lc "tmux new-session -d -s '$SESSION' -x 200 -y 50 'export DISABLE_AUTOUPDATER=1 && { [ -f \$HOME/.claude/oauth-token-env ] && . \$HOME/.claude/oauth-token-env || true; } && cd $CWD && $BOT_CLI $FLAG --model opus --permission-mode auto --effort high --channels plugin:telegram@claude-plugins-official 2>>\$HOME/.claude/claude-stderr.log; echo EXIT=\$? >>\$HOME/.claude/claude-stderr.log'"
   fi
   sleep 4
-  $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
-  sleep 3
-  $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
+  if [[ "$(cat "$HOME_DIR/.claude/model-backend" 2>/dev/null)" == codex ]]; then
+    # In a resumed Codex session bare "1" is a real user prompt. Do not
+    # generate unsolicited turns while trying to dismiss startup dialogs.
+    local startup_pane
+    startup_pane=$($TMUX_CMD capture-pane -t "$SESSION" -p 2>/dev/null)
+    if echo "$startup_pane" | grep -q "Teach auto mode about your environment"; then
+      $TMUX_CMD send-keys -t "$SESSION" Escape 2>/dev/null
+    fi
+  else
+    $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
+    sleep 3
+    $TMUX_CMD send-keys -t "$SESSION" "1" Enter 2>/dev/null
+  fi
 
   # First-boot nudge: on brand-new sessions Claude sits in welcome screen
   # until the first user prompt. Without a nudge, plugin:telegram never
@@ -150,6 +164,11 @@ log_diag() {
 
 for entry in "${SESSIONS[@]}"; do
   IFS='|' read -r SESSION USER CWD <<< "$entry"
+
+  # A manual restart of one bot must not inspect/restart other users' bots.
+  if [[ -n "${CLAUDE_TG_ONLY_USER:-}" && "$USER" != "$CLAUDE_TG_ONLY_USER" ]]; then
+    continue
+  fi
 
   if [[ "$USER" == "root" ]]; then
     TMUX_CMD="tmux"

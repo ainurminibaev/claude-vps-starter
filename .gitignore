@@ -5,3 +5,10 @@ whisper-asr/cache/
 whisper-asr/models/
 __pycache__/
 .DS_Store
+# Rendered Codex transport config and credentials are private runtime files.
+codex-backend/config.yaml
+codex-backend/auths/
+codex-backend/clients/
+codex-backend/client.env
+codex-backend/client-key
+codex-backend/*.tar.gz
