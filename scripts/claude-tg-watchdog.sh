@@ -11,13 +11,14 @@
 #                                              → tier1 nudge; tier2 restart+nudge
 #   7. bun frozen (heartbeat file mtime stale >60s, process alive)
 #                                              → kill bun; Pattern 4 next cycle restarts
+#   10. auto-mode classifier billing notice    → Enter; continue the held action
 
 LOG="/var/log/claude-tg-watchdog.log"
 STATE_DIR="/var/run/claude-tg-wd"
 mkdir -p "$STATE_DIR"
 
 # Sessions: "tmux_session_name|linux_user|claude_cwd"
-# Each restart generates a fresh UUID stored in $STATE_DIR/$SESSION-current-uuid
+# Restarts resume the UUID stored in $STATE_DIR/$SESSION-current-uuid.
 SESSIONS=(
   "claude-tg|root|/root"
   "claude-tg-wife|wife|/home/wife"
@@ -36,6 +37,17 @@ SESSIONS=(
 SPINNER_RE='✻|✽|✶|✢|⏳|Brewing|Brewed|Sketching|Forging|Twisting|Musing|Generating|Spelunking|Cogitating|Compacting|Thinking|Working|Sketching|Choreographing|Imagining|Flowing|Germinating|Leavening|Noodling|Jitterbugging'
 
 NUDGE_TEXT='Проверь Telegram: на накопившиеся неотвеченные сообщения (включая голосовые из inbox) — ответь по правилам из CLAUDE.md.'
+
+is_classifier_billing_notice() {
+  local notice_tail last_line
+  notice_tail=$(printf '%s\n' "$1" | tail -n 24)
+  last_line=$(printf '%s\n' "$notice_tail" | awk 'NF { last=$0 } END { gsub(/^[ \t]+|[ \t]+$/, "", last); print last }')
+  # Only acknowledge this known informational modal, never a tool approval or
+  # a warning quoted in chat/scrollback. The modal footer must be active.
+  [[ "$notice_tail" == *"We're changing auto mode to no longer charge for classifier requests"* &&
+     "$notice_tail" == *"auto-mode-classifier-billing"* &&
+     "$last_line" == "Enter to continue · Esc to cancel" ]]
+}
 
 restart_session() {
   local SESSION="$1" USER="$2" CWD="$3"
@@ -185,6 +197,15 @@ for entry in "${SESSIONS[@]}"; do
   fi
 
   pane=$($TMUX_CMD capture-pane -t "$SESSION" -p 2>/dev/null)
+
+  # Pattern 10: CLI 2.1.310 holds the first classifier-checked action while
+  # this gateway billing notice is open. Enter keeps Auto mode's existing
+  # classifier checks; Esc cancels the turn and makes the notice return.
+  if is_classifier_billing_notice "$pane"; then
+    $TMUX_CMD send-keys -t "$SESSION" Enter 2>/dev/null
+    echo "$(date -Iseconds) [$SESSION] acknowledged auto-mode classifier billing notice" >> "$LOG"
+    continue
+  fi
 
   # Pattern 1: rate-limit dialog (stuck >5 min → restart)
   STUCK_FILE="$STATE_DIR/$SESSION-ratelimit-stuck"
