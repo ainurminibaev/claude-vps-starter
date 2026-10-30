@@ -16,6 +16,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--binary", required=True, type=Path)
 parser.add_argument("--config", required=True, type=Path, help="Private JSON config of the desktop gateway")
 parser.add_argument("--claude", type=Path, default=Path.home() / ".local/bin/claude")
+parser.add_argument("--config-commentary", action="store_true", help="Use the upstream PR config option with the legacy environment flag removed")
 args = parser.parse_args()
 with tempfile.TemporaryDirectory(prefix="gateway-commentary-smoke-") as temp:
     root = Path(temp)
@@ -24,6 +25,8 @@ with tempfile.TemporaryDirectory(prefix="gateway-commentary-smoke-") as temp:
     except json.JSONDecodeError:
         import yaml  # Optional only for validation of the VPS YAML config.
         config = yaml.safe_load(args.config.read_text())
+    if args.config_commentary:
+        config.setdefault("client", {}).setdefault("claude", {})["show-codex-commentary"] = True
     key = config["access"]["api-keys"][0]
     auths = root / "auths"
     auths.mkdir(mode=0o700)
@@ -40,7 +43,10 @@ with tempfile.TemporaryDirectory(prefix="gateway-commentary-smoke-") as temp:
     candidate.write_text(json.dumps(config))
     candidate.chmod(0o600)
     env = os.environ.copy()
-    env["CPA_VISIBLE_CODEX_COMMENTARY"] = "1"
+    if args.config_commentary:
+        env.pop("CPA_VISIBLE_CODEX_COMMENTARY", None)
+    else:
+        env["CPA_VISIBLE_CODEX_COMMENTARY"] = "1"
     gateway = subprocess.Popen([str(args.binary), "-config", str(candidate)], env=env,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:

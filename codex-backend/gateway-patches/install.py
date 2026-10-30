@@ -44,10 +44,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
     parser.add_argument("--sha256", required=True)
+    parser.add_argument("--build-version", default="8.0.47-itab.2")
     parser.add_argument("--wait-idle", type=int, default=180)
     args = parser.parse_args()
     data = args.binary.read_bytes()
-    if hashlib.sha256(data).hexdigest() != args.sha256 or b"8.0.47-itab.1" not in data:
+    if hashlib.sha256(data).hexdigest() != args.sha256 or args.build_version.encode() not in data:
         raise SystemExit("Candidate checksum or build identifier mismatch")
     home = Path.home()
     mac = os.uname().sysname == "Darwin"
@@ -117,7 +118,7 @@ def main():
                 req = urllib.request.Request("http://127.0.0.1:18418/v1/models", headers={"Authorization": "Bearer " + key})
                 with urllib.request.urlopen(req, timeout=2) as response:
                     if any(model["id"] == "gpt-6.1-sol" for model in json.load(response)["data"]):
-                        print("Gateway updated: 8.0.47-itab.1; public commentary enabled; model ready.")
+                        print(f"Gateway updated: {args.build_version}; public commentary enabled; model ready.")
                         return
             except OSError:
                 pass
