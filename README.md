@@ -67,7 +67,7 @@ cd /root/projects/claude-vps-starter
 
 - VPS: 2 vCPU / 4 GB RAM минимум (Claude Code + MCP + распознавание речи; разовая сборка моделей при установке берёт ~2.5 ГБ RAM+swap). С татарским сервисом лучше 6+ GB.
 - Ubuntu 22.04 / 24.04 (должно работать и на Debian 12).
-- Anthropic API-ключ (или подписка Claude Pro/Max с совместимым доступом к Claude Code).
+- Доступ к модели: Anthropic API-ключ / подписка Claude с доступом к Claude Code либо авторизация ChatGPT/Codex для [опционального backend](docs/08-codex-backend.md).
 - Telegram-аккаунт и доступ к @BotFather.
 
 ## Что НЕ входит
