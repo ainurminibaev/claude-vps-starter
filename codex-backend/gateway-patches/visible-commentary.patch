@@ -1,16 +1,80 @@
 diff --git a/internal/translator/codex/claude/codex_claude_request.go b/internal/translator/codex/claude/codex_claude_request.go
-index 504a5b1..7d94fa8 100644
+index 504a5b1..d6c9633 100644
 --- a/internal/translator/codex/claude/codex_claude_request.go
 +++ b/internal/translator/codex/claude/codex_claude_request.go
-@@ -480,7 +480,7 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
- 	if toolsResult.IsArray() {
- 		template, _ = sjson.SetRawBytes(template, "tools", translatorcommon.JoinRawArray(toolItems))
- 	}
--	template = translatorcommon.SetRawArrayItems(template, "input", inputItems)
-+	template = translatorcommon.SetRawArrayItems(template, "input", dedupePublicCommentaryMirrors(inputItems))
+@@ -54,6 +54,7 @@ func ConvertClaudeRequestToCodexWithCompat(modelName string, inputRawJSON []byte
  
- 	return template, drops.Err()
- }
+ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool, preserveEmptyThinkingBlocks bool) ([]byte, error) {
+ 	rawJSON := inputRawJSON
++	visibleCommentary := codexPublicCommentaryVisible()
+ 	var drops translatorcommon.UserTurnDrops
+ 
+ 	template := []byte(`{"model":"","instructions":"","input":[]}`)
+@@ -104,10 +105,14 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 		messageResults := messagesResult.Array()
+ 		var pendingToolUseIDs []string
+ 		var pendingSystemReminders [][]byte
++		var pendingCommentaryMirror string
+ 
+ 		for i := 0; i < len(messageResults); i++ {
+ 			messageResult := messageResults[i]
+ 			messageRole := messageResult.Get("role").String()
++			if messageRole != "assistant" {
++				pendingCommentaryMirror = ""
++			}
+ 			if messageRole == "system" {
+ 				if reminderText, ok := translatorcommon.ClaudeMessageSystemReminderText(messageResult.Get("content")); ok {
+ 					message := []byte(`{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}`)
+@@ -145,6 +150,13 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 			}
+ 
+ 			appendTextContent := func(text string) {
++				if messageRole == "assistant" && pendingCommentaryMirror != "" {
++					expected := pendingCommentaryMirror
++					pendingCommentaryMirror = ""
++					if text == expected {
++						return
++					}
++				}
+ 				partType := "input_text"
+ 				if messageRole == "assistant" {
+ 					partType = "output_text"
+@@ -159,11 +171,13 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 			}
+ 
+ 			appendImageContent := func(content []byte) {
++				pendingCommentaryMirror = ""
+ 				contentItems = append(contentItems, content)
+ 				bufferedSendable++
+ 			}
+ 
+ 			appendDocumentContent := func(dataURL string) {
++				pendingCommentaryMirror = ""
+ 				content := []byte(`{"type":"input_file","file_data":"","filename":"document.pdf"}`)
+ 				content, _ = sjson.SetBytes(content, "file_data", dataURL)
+ 				contentItems = append(contentItems, content)
+@@ -195,9 +209,13 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 					return
+ 				}
+ 
++				pendingCommentaryMirror = ""
+ 				rawSignature := part.Get("signature").String()
+ 				if sigcompat.IsCodexCommentarySignatureMarker(rawSignature) {
+ 					appendCommentaryContent(part)
++					if visibleCommentary {
++						pendingCommentaryMirror = part.Get("thinking").String()
++					}
+ 					return
+ 				}
+ 				signature, ok := translatorcommon.CodexReplaySignatureForTarget(signatureTargetModel, rawSignature)
+@@ -256,6 +274,7 @@ func convertClaudeRequestToCodex(modelName string, inputRawJSON []byte, _ bool,
+ 							drops.Drop(contentType)
+ 						}
+ 					case "tool_use":
++						pendingCommentaryMirror = ""
+ 						flushMessage()
+ 						if id := messageContentResult.Get("id").String(); id != "" {
+ 							pendingToolUseIDs = append(pendingToolUseIDs, id)
 diff --git a/internal/translator/codex/claude/codex_claude_response.go b/internal/translator/codex/claude/codex_claude_response.go
 index edba12a..92bd985 100644
 --- a/internal/translator/codex/claude/codex_claude_response.go
@@ -74,50 +138,30 @@ index edba12a..92bd985 100644
  }
 diff --git a/internal/translator/codex/claude/public_commentary.go b/internal/translator/codex/claude/public_commentary.go
 new file mode 100644
-index 0000000..122e244
+index 0000000..869777e
 --- /dev/null
 +++ b/internal/translator/codex/claude/public_commentary.go
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,8 @@
 +package claude
 +
-+import (
-+	"github.com/tidwall/gjson"
-+	"os"
-+)
++import "os"
 +
 +// Explicit opt-in for clients that need progress messages during a tool loop.
 +func codexPublicCommentaryVisible() bool {
 +	return os.Getenv("CPA_VISIBLE_CODEX_COMMENTARY") == "1"
 +}
-+
-+func dedupePublicCommentaryMirrors(items [][]byte) [][]byte {
-+	var previous gjson.Result
-+	output := make([][]byte, 0, len(items))
-+	for _, raw := range items {
-+		item := gjson.ParseBytes(raw)
-+		if previous.Get("phase").String() == "commentary" &&
-+			item.Get("type").String() == "message" && item.Get("role").String() == "assistant" &&
-+			!item.Get("phase").Exists() && item.Get("content").Raw == previous.Get("content").Raw {
-+			// Consume exactly the adjacent mirror, including after gateway rollback.
-+			previous = gjson.Result{}
-+			continue
-+		}
-+		output = append(output, raw)
-+		previous = item
-+	}
-+	return output
-+}
 diff --git a/internal/translator/codex/claude/public_commentary_test.go b/internal/translator/codex/claude/public_commentary_test.go
 new file mode 100644
-index 0000000..07fe742
+index 0000000..3a35c9d
 --- /dev/null
 +++ b/internal/translator/codex/claude/public_commentary_test.go
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,82 @@
 +package claude
 +
 +import (
-+	"github.com/tidwall/gjson"
 +	"testing"
++
++	"github.com/tidwall/gjson"
 +)
 +
 +func TestVisiblePublicCommentaryPreservesReasoningAndFinalAnswer(t *testing.T) {
@@ -159,6 +203,7 @@ index 0000000..07fe742
 +}
 +
 +func TestVisibleCommentaryReplayKeepsPhaseWithoutDuplicate(t *testing.T) {
++	t.Setenv("CPA_VISIBLE_CODEX_COMMENTARY", "1")
 +	input := []byte(`{"model":"gpt-6.1-sol","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"Two agents are working.","signature":"cpa:commentary:v1"},{"type":"text","text":"Two agents are working."},{"type":"tool_use","id":"call_1","name":"Bash","input":{"command":"pwd"}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"/tmp"},{"type":"text","text":"User asks: what are the agents doing?"}]}]}`)
 +	body, err := ConvertClaudeRequestToCodexWithCompat("gpt-6.1-sol", input, false)
 +	if err != nil {
@@ -167,5 +212,29 @@ index 0000000..07fe742
 +	items := gjson.GetBytes(body, "input").Array()
 +	if len(items) != 4 || items[0].Get("phase").String() != "commentary" || items[1].Get("type").String() != "function_call" || items[3].Get("content.0.text").String() != "User asks: what are the agents doing?" {
 +		t.Fatalf("replay lost phase, tool call, or user steering: %s", body)
++	}
++}
++
++func TestVisibleCommentaryReplayDefaultKeepsEqualFinal(t *testing.T) {
++	t.Setenv("CPA_VISIBLE_CODEX_COMMENTARY", "")
++	payload := []byte(`{"model":"m","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"same","signature":"cpa:commentary:v1"},{"type":"text","text":"same"}]}]}`)
++	out, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", payload, false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(gjson.GetBytes(out, "input").Array()) != 2 {
++		t.Fatalf("default replay changed: %s", out)
++	}
++}
++
++func TestVisibleCommentaryReplayPreservesFinalBesideMirror(t *testing.T) {
++	t.Setenv("CPA_VISIBLE_CODEX_COMMENTARY", "1")
++	payload := []byte(`{"model":"m","messages":[{"role":"assistant","content":[{"type":"thinking","thinking":"Progress","signature":"cpa:commentary:v1"},{"type":"text","text":"Progress"},{"type":"text","text":"Final answer"}]},{"role":"user","content":"Status?"}]}`)
++	out, err := ConvertClaudeRequestToCodex("gpt-6.1-sol", payload, false)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(gjson.GetBytes(out, "input").Array()) != 3 || gjson.GetBytes(out, "input.1.content.0.text").String() != "Final answer" || gjson.GetBytes(out, "input.2.content.0.text").String() != "Status?" {
++		t.Fatalf("final answer or user steering changed: %s", out)
 +	}
 +}

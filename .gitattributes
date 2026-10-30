@@ -1,0 +1,3 @@
+# Unified patches contain required context prefixes (a space before source tabs).
+# Format/check the source itself; these prefixes are patch data, not indentation.
+codex-backend/gateway-patches/*.patch -whitespace
