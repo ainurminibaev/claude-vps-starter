@@ -61,6 +61,7 @@ cd /root/projects/claude-vps-starter
 - [docs/06-rules-claudemd.md](docs/06-rules-claudemd.md) — как устроен CLAUDE.md и memory
 - [docs/07-troubleshooting.md](docs/07-troubleshooting.md) — частые проблемы
 - [docs/08-codex-backend.md](docs/08-codex-backend.md) — Codex backend, сохранение истории и памяти, cron, возврат на Claude
+- [docs/09-latency.md](docs/09-latency.md) — замеры задержек, Auto Mode и image tool pass-through
 
 Шаблоны:
 - [templates/CLAUDE.md](templates/CLAUDE.md) — канон правил, копируй в `/root/CLAUDE.md` и адаптируй

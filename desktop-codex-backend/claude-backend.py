@@ -168,6 +168,7 @@ class Backend:
                   "routing": {"session-affinity": True, "retry": {"request-retry": 3, "max-retry-interval": 30}},
                   "upstream": {"codex": {"upstream-request-compression": True,
                                          "upstream-request-compression-min-bytes": 1024}},
+                  "multimedia": {"disable-image-generation": "passthrough"},
                   "requests": {"tls-handshake-timeout-seconds": 20, "nonstream-keepalive-interval": 10,
                       "streaming": {"keepalive-seconds": 15, "bootstrap-retries": 2},
                       "payload": {"override": [{"models": [{"name": MODEL, "protocol": "codex"}],
