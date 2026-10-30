@@ -15,6 +15,9 @@ asset="CLIProxyAPI_${version}_linux_amd64_no-plugin.tar.gz"
 release="https://github.com/router-for-me/CLIProxyAPI/releases/download/v${version}"
 proxy_stage=$(mktemp -d /tmp/codex-proxy-install.XXXXXX)
 trap 'rm -rf -- "$proxy_stage"' EXIT
+if [[ -n "${CODEX_PROXY_BINARY:-}" ]]; then
+  install -m 0755 "$CODEX_PROXY_BINARY" "$proxy_stage/cli-proxy-api"
+else
 curl --fail --silent --show-error --location --max-time 120 --output "$proxy_stage/$asset" "$release/$asset"
 curl --fail --silent --show-error --location --max-time 30 --output "$proxy_stage/checksums.txt" "$release/checksums.txt"
 python3 - "$proxy_stage" "$asset" <<'PY'
@@ -32,6 +35,7 @@ with tarfile.open(stage / asset) as archive:
 print('Release SHA256 verified')
 PY
 tar --extract --gzip --file "$proxy_stage/$asset" --directory "$proxy_stage" --no-same-owner --no-same-permissions
+fi
 install -d -m 0755 /root/.local/bin /usr/local/lib/claude-bot-cron
 install -m 0755 "$proxy_stage/cli-proxy-api" /root/.local/bin/.cli-proxy-api.next
 mv -f /root/.local/bin/.cli-proxy-api.next /root/.local/bin/cli-proxy-api

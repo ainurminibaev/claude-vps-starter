@@ -33,3 +33,9 @@ sudo -H bash codex-backend/install.sh root ilshat wife
 из [релиза CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.47)
 и в git не добавляется. В репозитории остаются установщик, шаблон, служба,
 скрипты запуска, документация и тесты.
+
+## Промежуточные сообщения
+
+Для CLIProxyAPI 8.0.47 подготовлена [совместимая сборка с видимым commentary](gateway-patches/README.md).
+Она сохраняет фазу сообщения при replay и показывает публичные ответы Codex
+во время работы. Сборка и проверка вынесены отдельно от стандартного installer.

@@ -60,6 +60,10 @@ def main():
         private_write(client_env, "CODEX_PROXY_KEY=" + shlex.quote(user_key) + "\n")
         os.chown(client_env, entry.pw_uid, entry.pw_gid)
     template = Path(__file__).with_name("config.example.yaml").read_text()
+    config_path = root / "config.yaml"
+    compression_backup = root / "config.before-compression.yaml"
+    if config_path.exists() and not compression_backup.exists():
+        private_write(compression_backup, config_path.read_text())
     private_write(root / "config.yaml", template.replace('["__CLIENT_KEYS__"]', json.dumps(keys)))
     token_file = auths / "codex-root.json"
     # Preserve refreshes performed by CPA; importing again must not restore an old token.

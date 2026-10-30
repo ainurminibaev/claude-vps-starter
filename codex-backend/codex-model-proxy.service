@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=HOME=/root
+Environment=CPA_VISIBLE_CODEX_COMMENTARY=1
 WorkingDirectory=/root/.config/codex-model-proxy
 ExecStart=/root/.local/bin/cli-proxy-api -config /root/.config/codex-model-proxy/config.yaml
 Restart=on-failure

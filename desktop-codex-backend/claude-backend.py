@@ -112,7 +112,7 @@ class Backend:
         except (OSError, ValueError, KeyError, urllib.error.URLError):
             return False
 
-    def install(self, archive=None):
+    def install(self, archive=None, proxy_binary=None):
         if os.uname().sysname != "Darwin" or os.uname().machine != "arm64":
             raise ValueError("This installer supports Apple Silicon macOS only")
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -120,6 +120,14 @@ class Backend:
         auths = self.root / "auths"
         auths.mkdir(exist_ok=True, mode=0o700)
         auths.chmod(0o700)
+        if proxy_binary:
+            if self.binary.exists():
+                backup = self.binary.with_name("cli-proxy-api.before-commentary")
+                if not backup.exists():
+                    private_write(backup, self.binary.read_bytes())
+                    backup.chmod(0o700)
+            private_write(self.binary, Path(proxy_binary).read_bytes())
+            self.binary.chmod(0o700)
         if not self.binary.exists():
             with tempfile.TemporaryDirectory(prefix="claude-backend-") as tmp:
                 asset = Path(archive) if archive else Path(tmp) / ARCHIVE
@@ -158,13 +166,19 @@ class Backend:
                   "oauth": {"auth-dir": str(auths), "model-alias": {"codex": [
                       {"name": MODEL, "alias": alias, "fork": True} for alias in ALIASES]}},
                   "routing": {"session-affinity": True, "retry": {"request-retry": 3, "max-retry-interval": 30}},
+                  "upstream": {"codex": {"upstream-request-compression": True,
+                                         "upstream-request-compression-min-bytes": 1024}},
                   "requests": {"tls-handshake-timeout-seconds": 20, "nonstream-keepalive-interval": 10,
                       "streaming": {"keepalive-seconds": 15, "bootstrap-retries": 2},
                       "payload": {"override": [{"models": [{"name": MODEL, "protocol": "codex"}],
                                                 "params": {"reasoning.effort": "high"}}]}},
                   "observability": {"logs": {"debug": False, "logging-to-file": False}}}
         # JSON is a YAML subset, understood by CLIProxyAPI's YAML loader.
-        write_json(self.root / "config.yaml", config)
+        config_path = self.root / "config.yaml"
+        compression_backup = self.root / "config.before-compression.json"
+        if config_path.exists() and not compression_backup.exists():
+            private_write(compression_backup, config_path.read_bytes())
+        write_json(config_path, config)
         logdir = self.home / "Library/Logs/claude-backend"
         logdir.mkdir(parents=True, exist_ok=True, mode=0o700)
         logdir.chmod(0o700)
@@ -172,7 +186,7 @@ class Backend:
                  "WorkingDirectory": str(self.root), "RunAtLoad": True, "KeepAlive": True,
                  "ThrottleInterval": 10, "StandardOutPath": str(logdir / "proxy.log"),
                  "StandardErrorPath": str(logdir / "proxy-error.log"),
-                 "EnvironmentVariables": {"HOME": str(self.home)}}
+                 "EnvironmentVariables": {"HOME": str(self.home), "CPA_VISIBLE_CODEX_COMMENTARY": "1"}}
         private_write(self.plist, plistlib.dumps(plist))
         command = self.home / ".local/bin/claude-backend"
         if Path(__file__).resolve() != command.resolve():
@@ -228,11 +242,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["install", "codex", "claude", "status", "start"])
     parser.add_argument("--archive", type=Path, help="Previously downloaded, checksum-verified during install")
+    parser.add_argument("--proxy-binary", type=Path, help="Locally built, patched gateway executable")
     args = parser.parse_args()
     backend = Backend()
     try:
         if args.command == "install":
-            backend.install(args.archive)
+            backend.install(args.archive, args.proxy_binary)
         elif args.command in ("codex", "claude"):
             backend.switch(args.command)
         elif args.command == "start":
