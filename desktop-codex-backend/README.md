@@ -88,6 +88,11 @@ Claude, сохрани приватную копию `~/.config/claude-backend/a
 задачи скрыты, см. [исправление commentary](../codex-backend/gateway-patches/README.md).
 Это отдельная совместимая сборка шлюза; сам Claude Code остаётся штатным.
 
+Для кодовых запросов включён штатный image `passthrough`: шлюз сохраняет
+явно запрошенные инструменты картинок и image endpoints, без автоматического
+добавления image tool в каждый запрос. Замеры и ограничения сравнения —
+в [диагностике задержек](../docs/09-latency.md).
+
 Проверки профиля без запросов к модели:
 `python3 -m unittest discover -s tests -p 'test_desktop_backend.py'`.
 Живой `smoke.py` использует временные настройки и историю, проверяет реальный
