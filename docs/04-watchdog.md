@@ -5,6 +5,7 @@ Claude Code в tmux иногда застревает. Причины:
 - Rate-limit dialog («You hit your limit…»).
 - Workspace trust prompt после перезапуска.
 - Auto-mode enable prompt.
+- Информационное окно Auto mode о classifier billing при работе через шлюз.
 - Resume-from-summary prompt при ресюме сессии.
 - Упал Bun-процесс MCP-сервера plugin:telegram.
 - Упала сама tmux-сессия.
@@ -28,6 +29,17 @@ Claude Code в tmux иногда застревает. Причины:
 8. **AskUserQuestion / интерактивная модалка?** Если в pane видно `Enter to select … Esc to cancel` или `Enter to confirm … Esc to cancel` — шлёт Escape. Это резервная защита: бот **не должен** использовать `AskUserQuestion` в Telegram-канале (правило в CLAUDE.md, см. [06-rules-claudemd.md §10](06-rules-claudemd.md)), но если случайно вызвал — главный turn зависает до Esc, и Pattern 8 его снимает. Без этого бот молчит часами.
 
 Лог каждого действия — в `/var/log/claude-tg-watchdog.log`. На каждый рестарт пишется diag-снимок в `/var/log/claude-tg-diag/<session>-<ts>.txt` (хранятся последние 30 на сессию): ps-вывод, tmux pane, debug-лог Claude, lock-файлы — для post-mortem.
+
+### Информационное окно classifier billing (Pattern 10)
+
+Claude Code 2.1.310 при первом проверяемом действии через шлюз может показать
+`We're changing auto mode to no longer charge for classifier requests`.
+Сообщения Telegram продолжают приходить, но действие ждёт ответа. Watchdog
+нажимает Enter только при совпадении известного заголовка, ссылки
+`auto-mode-classifier-billing` и активной последней строки
+`Enter to continue · Esc to cancel`. Продолжается прежний Auto mode с проверками.
+Запросы на доступ и процитированные в чате предупреждения этому правилу не
+соответствуют. Подробности — [официальная документация](https://code.claude.com/docs/en/auto-mode-classifier-billing).
 
 ## 2. Установка
 
