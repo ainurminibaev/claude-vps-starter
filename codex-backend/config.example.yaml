@@ -35,6 +35,23 @@ requests:
             protocol: "codex"
         params:
           "reasoning.effort": "high"
+      # Native Auto Mode stage one; main work and stage two keep High.
+      # Unknown classifier envelopes fall back to High automatically.
+      - models:
+          - name: "gpt-6.1-sol"
+            protocol: "codex"
+            from-protocol: "claude"
+            match:
+              - "input.#": 2
+                "input.0.role": "developer"
+                "input.1.role": "user"
+                "input.1.content.0.text": "<transcript>\n"
+            exist:
+              - 'input.1.content.#(text%"*Stage 1 does NOT apply user intent or ALLOW exceptions*").text'
+            not-exist:
+              - "tools.0"
+        params:
+          "reasoning.effort": "medium"
 observability:
   logs:
     debug: false

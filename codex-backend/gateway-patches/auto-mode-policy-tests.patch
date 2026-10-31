@@ -1,0 +1,70 @@
+diff --git a/internal/runtime/executor/codex_auto_mode_config_test.go b/internal/runtime/executor/codex_auto_mode_config_test.go
+new file mode 100644
+index 0000000..fd5cc78
+--- /dev/null
++++ b/internal/runtime/executor/codex_auto_mode_config_test.go
+@@ -0,0 +1,64 @@
++package executor
++
++import (
++	"context"
++	"io"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/config"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
++	sdktranslator "github.com/router-for-me/CLIProxyAPI/v8/sdk/translator"
++	"github.com/tidwall/gjson"
++)
++
++func TestAutoModeStageOneEffortConfig(t *testing.T) {
++	const marker = `input.1.content.#(text%"*Stage 1 does NOT apply user intent or ALLOW exceptions*").text`
++	rules := []config.PayloadRule{
++		{Models: []config.PayloadModelRule{{Name: "gpt-6.1-sol", Protocol: "codex"}}, Params: map[string]any{"reasoning.effort": "high"}},
++		{Models: []config.PayloadModelRule{{Name: "gpt-6.1-sol", Protocol: "codex", FromProtocol: "claude", Match: []map[string]any{{"input.#": 2, "input.0.role": "developer", "input.1.role": "user", "input.1.content.0.text": "<transcript>\n"}}, Exist: []string{marker}, NotExist: []string{"tools.0"}}}, Params: map[string]any{"reasoning.effort": "medium"}},
++	}
++	for _, tt := range []struct{ name, payload, want string }{
++		{"native stage one", `{"model":"gpt-6.1-sol","max_tokens":64,"thinking":{"type":"disabled"},"stop_sequences":["</block>"],"system":"classifier policy","messages":[{"role":"user","content":[{"type":"text","text":"<transcript>\n"},{"type":"text","text":"Stage 1 does NOT apply user intent or ALLOW exceptions"}]}]}`, "medium"},
++		{"ordinary main request", `{"model":"gpt-6.1-sol","max_tokens":1024,"messages":[{"role":"user","content":"Fix the application"}]}`, "high"},
++		{"stage two unchanged", `{"model":"gpt-6.1-sol","max_tokens":64,"thinking":{"type":"disabled"},"messages":[{"role":"user","content":"Stage 2 must apply user intent"}]}`, "high"},
++		{"main quote with tools", `{"model":"gpt-6.1-sol","max_tokens":1024,"tools":[{"name":"Bash","description":"Run shell commands","input_schema":{"type":"object","properties":{}}}],"messages":[{"role":"user","content":"Stage 1 does NOT apply user intent or ALLOW exceptions"}]}`, "high"},
++	} {
++		for _, stream := range []bool{false, true} {
++			t.Run(tt.name+map[bool]string{true: "/stream", false: "/nonstream"}[stream], func(t *testing.T) {
++				captured := make(chan []byte, 1)
++				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++					body, err := io.ReadAll(r.Body)
++					if err != nil {
++						t.Error(err)
++					}
++					captured <- body
++					w.Header().Set("Content-Type", "text/event-stream")
++					_, _ = io.WriteString(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_config\",\"status\":\"completed\",\"model\":\"gpt-6.1-sol\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"OK\"}]}]}}\n\n")
++				}))
++				t.Cleanup(upstream.Close)
++				executor := NewCodexExecutor(&config.Config{SDKConfig: config.SDKConfig{DisableImageGeneration: config.DisableImageGenerationPassthrough}, Payload: config.PayloadConfig{Override: rules}})
++				req := cliproxyexecutor.Request{Model: "gpt-6.1-sol", Payload: []byte(tt.payload)}
++				opts := cliproxyexecutor.Options{SourceFormat: sdktranslator.FormatClaude, Stream: stream}
++				if stream {
++					result, err := executor.ExecuteStream(context.Background(), codexOAuthTestAuth(upstream.URL), req, opts)
++					if err != nil {
++						t.Fatal(err)
++					}
++					for chunk := range result.Chunks {
++						if chunk.Err != nil {
++							t.Fatal(chunk.Err)
++						}
++					}
++				} else if _, err := executor.Execute(context.Background(), codexOAuthTestAuth(upstream.URL), req, opts); err != nil {
++					t.Fatal(err)
++				}
++				body := <-captured
++				if effort := gjson.GetBytes(body, "reasoning.effort").String(); effort != tt.want {
++					t.Fatalf("effort = %q, want %q; input=%s; tools=%s", effort, tt.want, gjson.GetBytes(body, "input").Raw, gjson.GetBytes(body, "tools").Raw)
++				}
++			})
++		}
++	}
++}
