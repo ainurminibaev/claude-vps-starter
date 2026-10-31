@@ -10,6 +10,13 @@
 Нужны установленный Claude Code, Python 3 и существующий вход в Codex
 в `~/.codex/auth.json` (файловое хранилище с ChatGPT OAuth).
 
+Для поиска через shell и context-mode нужен отдельный `rg` в PATH Claude:
+`brew install ripgrep`. Встроенный поиск Claude и копия `rg` внутри установки
+Codex не обеспечивают доступность команды для subprocess плагина.
+Проверка: `command -v rg && rg --version` из окружения Claude/context-mode.
+После установки в уже присутствующий `/opt/homebrew/bin` перезапуск сессии
+не нужен. Разбор реального инцидента — [аудит инструментов](../docs/10-tooling-audit.md).
+
 ```sh
 python3 desktop-codex-backend/claude-backend.py install
 claude-backend start
