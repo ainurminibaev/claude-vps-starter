@@ -53,6 +53,17 @@ def read_json(path, default=None):
     return json.loads(path.read_text()) if path.exists() else default
 
 
+def auto_mode_override():
+    # Only the native stage-one classifier envelope gets a smaller effort.
+    # Main work, stage two and unknown future envelopes retain High.
+    marker = 'input.1.content.#(text%"*Stage 1 does NOT apply user intent or ALLOW exceptions*").text'
+    return {"models": [{"name": MODEL, "protocol": "codex", "from-protocol": "claude",
+                        "match": [{"input.#": 2, "input.0.role": "developer", "input.1.role": "user",
+                                   "input.1.content.0.text": "<transcript>\n"}],
+                        "exist": [marker], "not-exist": ["tools.0"]}],
+            "params": {"reasoning.effort": "medium"}}
+
+
 def codex_env(key):
     return {"ANTHROPIC_BASE_URL": URL, "ANTHROPIC_AUTH_TOKEN": key,
             # Prevent a saved API key from taking precedence over the loopback token.
@@ -172,7 +183,7 @@ class Backend:
                   "requests": {"tls-handshake-timeout-seconds": 20, "nonstream-keepalive-interval": 10,
                       "streaming": {"keepalive-seconds": 15, "bootstrap-retries": 2},
                       "payload": {"override": [{"models": [{"name": MODEL, "protocol": "codex"}],
-                                                "params": {"reasoning.effort": "high"}}]}},
+                                                "params": {"reasoning.effort": "high"}}, auto_mode_override()]}},
                   "observability": {"logs": {"debug": False, "logging-to-file": False}}}
         # JSON is a YAML subset, understood by CLIProxyAPI's YAML loader.
         config_path = self.root / "config.yaml"

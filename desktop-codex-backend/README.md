@@ -111,6 +111,22 @@ HTML-страницу upstream от JSON-ошибок авторизации и 
 добавления image tool в каждый запрос. Замеры и ограничения сравнения —
 в [диагностике задержек](../docs/09-latency.md).
 
+Первичная проверка Auto Mode использует Medium вместо общего High только
+для проверенного нативного stage-one envelope. Основная работа и stage two
+остаются High. Неизвестный формат проверки получает прежний High.
+Для существующей установки без перезапуска клиента:
+`python3 codex-backend/configure_auto_mode.py --apply`.
+Откат только этого правила: та же команда с `--revert`.
+Замеры и ограничения — в [аудите инструментов](../docs/10-tooling-audit.md).
+
+Опциональная диагностика делает реальные запросы к модели. Сначала
+`python3 desktop-codex-backend/auto-mode-capture.py`, затем
+`python3 desktop-codex-backend/auto-mode-effort-probe.py`.
+Fixture содержит только изолированную синтетическую задачу; policy и отчёты
+остаются приватными в `~/.config/claude-backend/auto-mode-audit/`.
+`--force-stage-two` у capture добавляет блокировку только безвредной тестовой
+записи, чтобы проверить настоящий повторный review; разрешающий ответ не подделывается.
+
 Проверки профиля без запросов к модели:
 `python3 -m unittest discover -s tests -p 'test_desktop_backend.py'`.
 Живой `smoke.py` использует временные настройки и историю, проверяет реальный
