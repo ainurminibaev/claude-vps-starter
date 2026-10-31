@@ -39,7 +39,7 @@ def main():
         data = yaml.safe_load(original)
         dump = lambda value: yaml.safe_dump(value, allow_unicode=True, sort_keys=False)
     if not (args.apply or args.revert):
-        print("Dry run: main High; recognized Auto Mode stage one Medium; stage two High.")
+        print("Dry run: recognize Auto Mode stage one and select Medium; retain other effort rules.")
         return
     updated = dump(configure(data, args.revert)).encode()
     if updated == original:
@@ -57,7 +57,7 @@ def main():
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-    print("Auto Mode policy removed; main High." if args.revert else "Auto Mode stage one Medium; main and stage two High. Config hot-reload; clients unchanged.")
+    print("Auto Mode stage-one override removed; other effort rules retained." if args.revert else "Auto Mode stage one Medium; other effort rules retained. Config hot-reload; clients unchanged.")
 
 
 if __name__ == "__main__":

@@ -30,7 +30,8 @@ ALIASES = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
 MANAGED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
            "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
            "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_EFFORT_LEVEL",
-           "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_AUTO_MODE_SERVER")
+           "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_AUTO_MODE_SERVER",
+           "CLAUDE_CODE_GATEWAY_HINT_HEADERS")
 
 
 def private_write(path, data):
@@ -64,6 +65,27 @@ def auto_mode_override():
             "params": {"reasoning.effort": "medium"}}
 
 
+def client_effort_default():
+    return {"models": [{"name": MODEL, "protocol": "codex"}],
+            "params": {"reasoning.effort": "medium"}}
+
+
+def auxiliary_effort_override():
+    # Native request-class hints keep all auxiliary reviews on the old High policy.
+    return {"models": [{"name": MODEL, "protocol": "codex", "from-protocol": "claude",
+                        "headers": {"x-claude-code-request-class": "auxiliary"}}],
+            "params": {"reasoning.effort": "high"}}
+
+
+def classifier_effort_override():
+    # Retain High for the observed classifier envelope even on already-running
+    # clients that have not yet picked up the opt-in gateway hint headers.
+    rule = auto_mode_override()
+    rule["models"][0].pop("exist")
+    rule["params"]["reasoning.effort"] = "high"
+    return rule
+
+
 def codex_env(key):
     return {"ANTHROPIC_BASE_URL": URL, "ANTHROPIC_AUTH_TOKEN": key,
             # Prevent a saved API key from taking precedence over the loopback token.
@@ -71,9 +93,9 @@ def codex_env(key):
             "ANTHROPIC_DEFAULT_OPUS_MODEL": ALIASES[0],
             "ANTHROPIC_DEFAULT_SONNET_MODEL": ALIASES[1],
             "ANTHROPIC_DEFAULT_HAIKU_MODEL": ALIASES[2],
-            "CLAUDE_CODE_EFFORT_LEVEL": "high",
             # Codex uses the client's classifier, not Anthropic server safeguards.
             "CLAUDE_CODE_AUTO_MODE_SERVER": "0",
+            "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "1",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "475000"}
 
 
@@ -84,7 +106,10 @@ def activate(settings, state, env):
         original = settings.get("env", {})
         state["baseline"] = {k: original[k] for k in MANAGED if k in original}
         state["env_existed"] = "env" in settings
-    settings.setdefault("env", {}).update(env)
+    # This environment variable takes precedence over /effort and --effort.
+    # Keep its native value in baseline, but remove the old profile's lock.
+    settings.setdefault("env", {}).pop("CLAUDE_CODE_EFFORT_LEVEL", None)
+    settings["env"].update(env)
     state["active"] = "codex"
     return settings, state
 
@@ -184,8 +209,8 @@ class Backend:
                   "multimedia": {"disable-image-generation": "passthrough"},
                   "requests": {"tls-handshake-timeout-seconds": 20, "nonstream-keepalive-interval": 10,
                       "streaming": {"keepalive-seconds": 15, "bootstrap-retries": 2},
-                      "payload": {"override": [{"models": [{"name": MODEL, "protocol": "codex"}],
-                                                "params": {"reasoning.effort": "high"}}, auto_mode_override()]}},
+                      "payload": {"default": [client_effort_default()],
+                                  "override": [auxiliary_effort_override(), classifier_effort_override(), auto_mode_override()]}},
                   "observability": {"logs": {"debug": False, "logging-to-file": False}}}
         # JSON is a YAML subset, understood by CLIProxyAPI's YAML loader.
         config_path = self.root / "config.yaml"
@@ -245,7 +270,7 @@ class Backend:
         actual = read_json(self.settings, {}).get("env", {}).get("ANTHROPIC_BASE_URL") == URL
         print("Profile:", "codex" if actual else "claude")
         if actual:
-            print(f"Backend: {MODEL}, reasoning high; opus/sonnet/haiku are compatibility aliases.")
+            print(f"Backend: {MODEL}, client-selected effort; opus/sonnet/haiku are compatibility aliases.")
             print("Local gateway:", "ready" if self.health() else "unavailable")
         elif state.get("active") == "codex":
             print("Settings changed externally; saved original environment is available for restoration.")
