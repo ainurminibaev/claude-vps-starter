@@ -24,6 +24,8 @@ git apply --check "$patch_dir/http2-protocol-recovery.patch"
 git apply "$patch_dir/http2-protocol-recovery.patch"
 git apply --check "$patch_dir/auto-mode-policy-tests.patch"
 git apply "$patch_dir/auto-mode-policy-tests.patch"
+git apply --check "$patch_dir/client-effort-tests.patch"
+git apply "$patch_dir/client-effort-tests.patch"
 CGO_ENABLED=0 "$go_bin" test ./internal/translator/codex/claude ./internal/runtime/executor ./internal/runtime/executor/helps ./sdk/cliproxy/auth
 CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" "$go_bin" build -trimpath \
   -ldflags '-s -w -X main.Version=8.0.47+codex-compat.4 -X main.Commit=90c447d-compat' \

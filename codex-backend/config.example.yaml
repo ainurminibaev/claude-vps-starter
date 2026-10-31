@@ -29,14 +29,37 @@ requests:
     keepalive-seconds: 15
     bootstrap-retries: 2
   payload:
-    override:
+    default:
       - models:
           - name: "gpt-6.1-sol"
             protocol: "codex"
         params:
+          "reasoning.effort": "medium"
+    override:
+      # Native request-class hints preserve the old High policy for auxiliary work.
+      - models:
+          - name: "gpt-6.1-sol"
+            protocol: "codex"
+            from-protocol: "claude"
+            headers:
+              x-claude-code-request-class: "auxiliary"
+        params:
           "reasoning.effort": "high"
-      # Native Auto Mode stage one; main work and stage two keep High.
-      # Unknown classifier envelopes fall back to High automatically.
+      # Envelope fallback for existing clients without gateway hint headers.
+      - models:
+          - name: "gpt-6.1-sol"
+            protocol: "codex"
+            from-protocol: "claude"
+            match:
+              - "input.#": 2
+                "input.0.role": "developer"
+                "input.1.role": "user"
+                "input.1.content.0.text": "<transcript>\n"
+            not-exist:
+              - "tools.0"
+        params:
+          "reasoning.effort": "high"
+      # The recognized native Auto Mode stage one uses Medium instead.
       - models:
           - name: "gpt-6.1-sol"
             protocol: "codex"
