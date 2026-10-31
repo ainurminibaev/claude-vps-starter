@@ -29,11 +29,15 @@ def atomic(path, data, mode):
 def pending_requests(lines):
     pending = set()
     for line in lines:
+        if line.startswith("CLIProxyAPI Version:"):
+            # Requests from an exited process cannot still be in flight.
+            pending.clear()
+            continue
         match = re.search(r'\[[^]]+\] \[([0-9a-f]{8})\]', line)
         if not match:
             continue
         request = match.group(1)
-        if "session-affinity: cache hit" in line:
+        if "session-affinity:" in line and ("cache hit" in line or "cache miss" in line):
             pending.add(request)
         if "[gin_logger.go:" in line:
             pending.discard(request)
