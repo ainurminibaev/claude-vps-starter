@@ -172,7 +172,7 @@ headless-команда с неизменённым `--model opus` и новым
 В stock CLIProxyAPI 8.0.47 публичный Codex `commentary` передаётся как скрытый
 `thinking`. Поэтому вопросы во время большой задачи могут получать ответы,
 которые не видны в обычном интерфейсе Claude Code. Для Mac и VPS подготовлена
-[сборка 8.0.47+codex-compat.3](../codex-backend/gateway-patches/README.md): видимые
+[сборка 8.0.47+codex-compat.4](../codex-backend/gateway-patches/README.md): видимые
 сообщения, сохранение phase при replay, тесты, установка и откат. Сам Claude
 Code и Telegram-плагин не меняются. На VPS флаг включается в службе шлюза,
 на Mac — в его LaunchAgent.
