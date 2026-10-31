@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a pinned upstream plus the reviewed public-commentary compatibility patch.
+# Build a pinned upstream plus the reviewed compatibility patches.
 # Usage: GO_BIN=/path/to/go bash build.sh darwin arm64 /absolute/output
 set -euo pipefail
 target_os=${1:?darwin or linux}
@@ -18,8 +18,10 @@ cd "$gateway_stage/source"
 }
 git apply --check "$patch_dir/visible-commentary.patch"
 git apply "$patch_dir/visible-commentary.patch"
-"$go_bin" test ./internal/translator/codex/claude
+git apply --check "$patch_dir/network-recovery.patch"
+git apply "$patch_dir/network-recovery.patch"
+CGO_ENABLED=0 "$go_bin" test ./internal/translator/codex/claude ./internal/runtime/executor ./internal/runtime/executor/helps ./sdk/cliproxy/auth
 CGO_ENABLED=0 GOOS="$target_os" GOARCH="$target_arch" "$go_bin" build -trimpath \
-  -ldflags '-s -w -X main.Version=8.0.47+codex-commentary.2 -X main.Commit=90c447d-commentary' \
+  -ldflags '-s -w -X main.Version=8.0.47+codex-compat.3 -X main.Commit=90c447d-compat' \
   -o "$output" ./cmd/server
 echo "Built $output"
