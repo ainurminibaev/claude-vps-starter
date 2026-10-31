@@ -30,7 +30,7 @@ ALIASES = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
 MANAGED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
            "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
            "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_EFFORT_LEVEL",
-           "CLAUDE_CODE_AUTO_COMPACT_WINDOW")
+           "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_AUTO_MODE_SERVER")
 
 
 def private_write(path, data):
@@ -72,6 +72,8 @@ def codex_env(key):
             "ANTHROPIC_DEFAULT_SONNET_MODEL": ALIASES[1],
             "ANTHROPIC_DEFAULT_HAIKU_MODEL": ALIASES[2],
             "CLAUDE_CODE_EFFORT_LEVEL": "high",
+            # Codex uses the client's classifier, not Anthropic server safeguards.
+            "CLAUDE_CODE_AUTO_MODE_SERVER": "0",
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "475000"}
 
 
