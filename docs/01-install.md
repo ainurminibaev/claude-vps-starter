@@ -14,7 +14,7 @@ ssh root@<ip-твоего-vps>
 
 ```bash
 apt update && apt upgrade -y
-apt install -y curl git tmux build-essential ca-certificates gnupg python3 python3-pip ripgrep python-is-python3 python3-fitz python3-openpyxl
+apt install -y curl git tmux build-essential ca-certificates gnupg python3 python3-pip python3-yaml ripgrep python-is-python3 python3-fitz python3-openpyxl
 ```
 
 ## 2. Docker + docker compose plugin
