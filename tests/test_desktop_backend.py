@@ -12,8 +12,9 @@ class Profiles(unittest.TestCase):
         self.assertIn("claude-sonnet-5", backend.ALIASES)
 
     def test_restore_original_and_keep_new_unrelated_settings(self):
-        initial = {"model": "opus", "hooks": {"keep": True}, "env": {"ANTHROPIC_AUTH_TOKEN": "old", "OTHER": "1"}}
+        initial = {"model": "opus", "hooks": {"keep": True}, "env": {"ANTHROPIC_AUTH_TOKEN": "old", "OTHER": "1", "CLAUDE_CODE_AUTO_MODE_SERVER": "1"}}
         active, state = backend.activate(initial, {}, backend.codex_env("local"))
+        self.assertEqual(active["env"]["CLAUDE_CODE_AUTO_MODE_SERVER"], "0")
         active["env"]["NEW"] = "2"
         active["language"] = "Russian"
         restored, state = backend.deactivate(active, state)

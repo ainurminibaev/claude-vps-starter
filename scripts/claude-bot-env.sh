@@ -4,6 +4,7 @@ if [[ "${ANTHROPIC_BASE_URL:-}" == http://127.0.0.1:18418 ]]; then
   unset ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_MODEL
   unset ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL
   unset CLAUDE_CODE_MAX_CONTEXT_TOKENS
+  unset CLAUDE_CODE_AUTO_MODE_SERVER
 fi
 if [[ -f "$HOME/.claude/oauth-token-env" ]]; then
   source "$HOME/.claude/oauth-token-env"
@@ -23,5 +24,7 @@ if [[ "$_claude_bot_backend" == codex ]]; then
   export ANTHROPIC_DEFAULT_SONNET_MODEL="$ANTHROPIC_MODEL"
   export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ANTHROPIC_MODEL"
   export CLAUDE_CODE_MAX_CONTEXT_TOKENS=475000
+  # Keep client-side Auto Mode checks without requesting Anthropic safeguards.
+  export CLAUDE_CODE_AUTO_MODE_SERVER=0
 fi
 unset _claude_bot_backend
