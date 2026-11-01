@@ -76,6 +76,27 @@ class BotLaunchTests(unittest.TestCase):
         self.assertEqual(r.returncode, 7)
         self.assertTrue(json.loads(r.stdout)["args"])
 
+    def test_per_user_model_and_effort_override_watchdog_only_in_codex(self):
+        (self.home / ".config/codex-model-proxy/client.env").write_text(
+            "CODEX_PROXY_KEY=test-local-key\nCODEX_BOT_MODEL=gpt-6-astra\nCODEX_BOT_EFFORT=medium\n"
+        )
+        marker = self.home / ".claude/model-backend"
+        marker.write_text("codex\n")
+        for effort in [("--effort", "high"), ("--effort=high",)]:
+            args = ("--resume", "same-session", "--model", "opus", *effort)
+            result = self.launch(*args)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["args"],
+                             ["--model", "gpt-6-astra", "--effort", "medium", "--resume", "same-session"])
+        marker.unlink()
+        self.assertEqual(json.loads(self.launch(*args).stdout)["args"], list(args))
+
+    def test_unconfigured_codex_keeps_explicit_effort(self):
+        (self.home / ".claude/model-backend").write_text("codex\n")
+        result = self.launch("--effort", "high", "--resume", "same-session")
+        self.assertEqual(json.loads(result.stdout)["args"],
+                         ["--model", "gpt-6.1-sol", "--effort", "high", "--resume", "same-session"])
+
     def test_invalid_backend_does_not_launch_cli(self):
         (self.home / ".claude/model-backend").write_text("typo\n")
         r = self.launch()

@@ -17,6 +17,13 @@ case "$backend" in
     source "${CLAUDE_BOT_ENV_FILE:-/usr/local/lib/claude-bot-cron/env.sh}"
 
     args=()
+    if [[ -n "${CODEX_BOT_EFFORT:-}" ]]; then
+      case "$CODEX_BOT_EFFORT" in
+        low|medium|high|xhigh|max) ;;
+        *) echo 'Invalid CODEX_BOT_EFFORT' >&2; exit 2 ;;
+      esac
+      args+=(--effort "$CODEX_BOT_EFFORT")
+    fi
     while (($#)); do
       case "$1" in
         --model)
@@ -24,6 +31,15 @@ case "$backend" in
           shift 2
           ;;
         --model=*) shift ;;
+        --effort)
+          if (($# < 2)); then echo '--effort requires a value' >&2; exit 2; fi
+          if [[ -z "${CODEX_BOT_EFFORT:-}" ]]; then args+=("$1" "$2"); fi
+          shift 2
+          ;;
+        --effort=*)
+          if [[ -z "${CODEX_BOT_EFFORT:-}" ]]; then args+=("$1"); fi
+          shift
+          ;;
         *) args+=("$1"); shift ;;
       esac
     done
