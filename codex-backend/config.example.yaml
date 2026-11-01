@@ -33,6 +33,8 @@ requests:
       - models:
           - name: "gpt-6.1-sol"
             protocol: "codex"
+          - name: "gpt-6-astra"
+            protocol: "codex"
         params:
           "reasoning.effort": "medium"
     override:
@@ -43,11 +45,17 @@ requests:
             from-protocol: "claude"
             headers:
               x-claude-code-request-class: "auxiliary"
+          - name: "gpt-6-astra"
+            protocol: "codex"
+            from-protocol: "claude"
+            headers:
+              x-claude-code-request-class: "auxiliary"
         params:
           "reasoning.effort": "high"
       # Envelope fallback for existing clients without gateway hint headers.
       - models:
-          - name: "gpt-6.1-sol"
+          - &classifier-envelope
+            name: "gpt-6.1-sol"
             protocol: "codex"
             from-protocol: "claude"
             match:
@@ -57,11 +65,14 @@ requests:
                 "input.1.content.0.text": "<transcript>\n"
             not-exist:
               - "tools.0"
+          - <<: *classifier-envelope
+            name: "gpt-6-astra"
         params:
           "reasoning.effort": "high"
       # The recognized native Auto Mode stage one uses Medium instead.
       - models:
-          - name: "gpt-6.1-sol"
+          - &classifier-stage-one
+            name: "gpt-6.1-sol"
             protocol: "codex"
             from-protocol: "claude"
             match:
@@ -73,6 +84,8 @@ requests:
               - 'input.1.content.#(text%"*Stage 1 does NOT apply user intent or ALLOW exceptions*").text'
             not-exist:
               - "tools.0"
+          - <<: *classifier-stage-one
+            name: "gpt-6-astra"
         params:
           "reasoning.effort": "medium"
 observability:

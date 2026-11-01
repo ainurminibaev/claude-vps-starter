@@ -6,6 +6,7 @@ if [[ "${ANTHROPIC_BASE_URL:-}" == http://127.0.0.1:18418 ]]; then
   unset CLAUDE_CODE_MAX_CONTEXT_TOKENS
   unset CLAUDE_CODE_AUTO_MODE_SERVER
   unset CLAUDE_CODE_GATEWAY_HINT_HEADERS
+  unset CLAUDE_CODE_EFFORT_LEVEL
 fi
 if [[ -f "$HOME/.claude/oauth-token-env" ]]; then
   source "$HOME/.claude/oauth-token-env"
@@ -15,12 +16,16 @@ if [[ -f "$HOME/.claude/model-backend" ]]; then
   IFS= read -r _claude_bot_backend < "$HOME/.claude/model-backend" || true
 fi
 if [[ "$_claude_bot_backend" == codex ]]; then
+  unset CODEX_BOT_MODEL CODEX_BOT_EFFORT
   source "$HOME/.config/codex-model-proxy/client.env"
   unset CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY
   export ANTHROPIC_BASE_URL=http://127.0.0.1:18418
   export ANTHROPIC_AUTH_TOKEN="${CODEX_PROXY_KEY:?Proxy client key missing}"
   unset CODEX_PROXY_KEY
-  export ANTHROPIC_MODEL=gpt-6.1-sol
+  export ANTHROPIC_MODEL="${CODEX_BOT_MODEL:-gpt-6.1-sol}"
+  if [[ -n "${CODEX_BOT_EFFORT:-}" ]]; then
+    export CLAUDE_CODE_EFFORT_LEVEL="$CODEX_BOT_EFFORT"
+  fi
   export ANTHROPIC_DEFAULT_OPUS_MODEL="$ANTHROPIC_MODEL"
   export ANTHROPIC_DEFAULT_SONNET_MODEL="$ANTHROPIC_MODEL"
   export ANTHROPIC_DEFAULT_HAIKU_MODEL="$ANTHROPIC_MODEL"
