@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -17,12 +18,18 @@ spec = importlib.util.spec_from_file_location('backend', repo / 'desktop-codex-b
 backend = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(backend)
 local = backend.Backend()
+if os.uname().sysname == 'Linux':
+    local.root = Path.home() / '.config/codex-model-proxy'
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 captures = []
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--force-stage-two', action='store_true',
                     help='Escalate only the harmless synthetic action to follow-up review; never force an allow verdict')
+parser.add_argument('--policy-settings', type=Path, help='Optional proposed native autoMode block, used only in isolated state')
+parser.add_argument('--audit-prefix', default='classifier', help='Private fixture filename prefix')
 args = parser.parse_args()
+if not args.audit_prefix.replace('-', '').replace('_', '').isalnum():
+    parser.error('audit-prefix must contain only letters, digits, hyphens or underscores')
 
 
 class Relay(BaseHTTPRequestHandler):
@@ -41,6 +48,9 @@ class Relay(BaseHTTPRequestHandler):
         classifier = str(payload.get('model', '')).split('[')[0] == 'claude-sonnet-5'
         if classifier:
             captures.append(payload)
+            # The isolated probe uses a recognizable classifier alias even on
+            # gateways whose production clients use the real Codex model name.
+            body = json.dumps({**payload, 'model': backend.MODEL}).encode()
         headers = {k: v for k, v in self.headers.items() if k.lower() not in ('host', 'content-length', 'connection', 'accept-encoding')}
         request = urllib.request.Request('http://127.0.0.1:18418' + self.path, data=body if body else None,
                                          headers=headers, method=self.command)
@@ -86,11 +96,20 @@ try:
         env = {k: v for k, v in os.environ.items() if not k.startswith('ANTHROPIC_') and k not in ('CLAUDECODE', 'CLAUDE_CODE_SESSION_ID')}
         env['CLAUDE_CONFIG_DIR'] = str(native)
         managed = backend.codex_env(local.key())
+        if os.uname().sysname == 'Linux':
+            for field in ('ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL'):
+                managed[field] = backend.MODEL
         managed['ANTHROPIC_BASE_URL'] = f'http://127.0.0.1:{server.server_port}'
         managed['CLAUDE_CODE_AUTO_MODE_MODEL'] = 'claude-sonnet-5'
         settings = root / 'settings.json'
-        backend.write_json(settings, {'env': managed})
-        command = [str(Path.home() / '.local/bin/claude'), '-p', '--output-format', 'json',
+        isolated_settings = {'env': managed}
+        if args.policy_settings:
+            proposed = backend.read_json(args.policy_settings, {})
+            if not isinstance(proposed.get('autoMode'), dict):
+                raise ValueError('policy-settings must contain an autoMode object')
+            isolated_settings['autoMode'] = proposed['autoMode']
+        backend.write_json(settings, isolated_settings)
+        command = [shutil.which('claude') or str(Path.home() / '.local/bin/claude'), '-p', '--output-format', 'json',
                    '--settings', str(settings), '--setting-sources', '', '--strict-mcp-config',
                    '--mcp-config', '{"mcpServers":{}}', '--tools', 'Bash', '--model', 'opus',
                    '--permission-mode', 'auto', '--max-turns', '4', '--no-session-persistence',
@@ -101,11 +120,11 @@ try:
         if captures:
             destination = local.root / 'auto-mode-audit'
             destination.mkdir(mode=0o700, exist_ok=True)
-            backend.write_json(destination / 'classifier-fixture.json', captures[0])
+            backend.write_json(destination / f'{args.audit_prefix}-fixture.json', captures[0])
             if len(captures) > 1:
-                backend.write_json(destination / 'classifier-stage-two.json', captures[1])
+                backend.write_json(destination / f'{args.audit_prefix}-stage-two.json', captures[1])
             payload = captures[0]
-            print(json.dumps({'fixture': str(destination / 'classifier-fixture.json'),
+            print(json.dumps({'fixture': str(destination / f'{args.audit_prefix}-fixture.json'),
                               'top_keys': list(payload), 'model': payload.get('model'),
                               'message_count': len(payload.get('messages', [])),
                               'system_chars': len(str(payload.get('system', '')))}, ensure_ascii=False), flush=True)

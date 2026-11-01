@@ -8,12 +8,16 @@ u="$1"
 h=$(getent passwd "$u" | cut -d: -f6)
 [[ -n "$h" && -d "$h/.claude" ]] || { echo "Unknown bot user: $u" >&2; exit 2; }
 marker="$h/.claude/model-backend"
+context_config=/usr/local/lib/claude-bot-cron/configure-channel-context.py
 if (($# == 1)); then
   if [[ -f "$marker" ]]; then cat "$marker"; else echo claude; fi
   exit 0
 fi
 case "$2" in
   claude)
+    if [[ -f "$context_config" && -f "$h/.claude/settings.json" ]]; then
+      python3 "$context_config" --settings "$h/.claude/settings.json" --revert
+    fi
     rm -f -- "$marker"
     ;;
   codex)
@@ -23,6 +27,10 @@ case "$2" in
     systemctl is-active --quiet codex-model-proxy.service || {
       echo 'codex-model-proxy.service is not running' >&2; exit 1;
     }
+    if [[ -f "$context_config" && -f "$h/.claude/channels/telegram/access.json" ]]; then
+      python3 "$context_config" --settings "$h/.claude/settings.json" \
+        --access "$h/.claude/channels/telegram/access.json" --apply
+    fi
     stage=$(mktemp "$h/.claude/model-backend.XXXXXX")
     printf '%s\n' codex > "$stage"
     chmod 0600 "$stage"

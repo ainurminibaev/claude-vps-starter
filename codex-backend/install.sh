@@ -44,6 +44,7 @@ for name in claude-bot-launch bot-backend; do
   mv -f "/usr/local/bin/.$name.next" "/usr/local/bin/$name"
 done
 install -m 0644 "$repo_dir/scripts/claude-bot-env.sh" /usr/local/lib/claude-bot-cron/env.sh
+install -m 0644 "$repo_dir/codex-backend/configure_channel_context.py" /usr/local/lib/claude-bot-cron/configure-channel-context.py
 users=("$@")
 if ((${#users[@]} == 0)); then users=(root); fi
 python3 "$repo_dir/codex-backend/prepare.py" --users "${users[@]}"
