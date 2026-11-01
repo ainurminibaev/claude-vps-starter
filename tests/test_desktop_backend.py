@@ -8,6 +8,22 @@ spec.loader.exec_module(backend)
 
 
 class Profiles(unittest.TestCase):
+    def test_selected_defaults_restore_and_reapply_without_effort_lock(self):
+        initial = {"model": "opus", "hooks": {"keep": True}}
+        selected = {"model": "gpt-6-astra", "effortLevel": "medium"}
+        active, state = backend.activate(initial, {}, backend.codex_env("key"), selected)
+        self.assertEqual(active["model"], "gpt-6-astra")
+        self.assertEqual(active["effortLevel"], "medium")
+        self.assertNotIn("CLAUDE_CODE_EFFORT_LEVEL", active["env"])
+        active, state = backend.activate(active, state, backend.codex_env("key"), {"effortLevel": "high"})
+        native, state = backend.deactivate(active, state)
+        self.assertEqual(native, initial)
+        native["model"] = "sonnet"
+        again, state = backend.activate(native, state, backend.codex_env("key"))
+        self.assertEqual(again["model"], "gpt-6-astra")
+        self.assertEqual(again["effortLevel"], "high")
+        self.assertEqual(backend.deactivate(again, state)[0], native)
+
     def test_classifier_alias_is_present(self):
         self.assertIn("claude-sonnet-5", backend.ALIASES)
 

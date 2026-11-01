@@ -28,3 +28,22 @@ back to Sol can use `CODEX_BOT_MODEL=gpt-6.1-sol` and the desired effort instead
 
 On 2026-11-01 the operator requested Astra Medium for all eleven VPS bots.
 The local Mac profile is independent and is not changed by this deployment.
+
+## Local Claude defaults
+
+The Mac profile controller also accepts explicit defaults for new sessions:
+
+```sh
+claude-backend codex --model gpt-6-astra --effort medium
+claude-backend status
+```
+
+This sets native `model` and `effortLevel` settings, without an environment
+effort lock; `/model`, `/effort` and command-line options remain available.
+It adds the selected model to the gateway classifier rules but does not change
+the existing Claude-compatible aliases (which still route to Sol). Existing
+processes are not restarted. Resuming a session with an explicitly saved or
+command-line model can retain that selection: inspect `/model` and `/effort`.
+`claude-backend claude` restores the previous native model/effort settings;
+returning to `codex` reapplies the saved Codex defaults. On 2026-11-01 the
+operator separately selected Astra Medium for new local sessions as well.

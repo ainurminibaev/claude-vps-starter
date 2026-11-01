@@ -99,7 +99,7 @@ def codex_env(key):
             "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "475000"}
 
 
-def activate(settings, state, env):
+def activate(settings, state, env, preferences=None):
     settings = json.loads(json.dumps(settings))
     state = json.loads(json.dumps(state))
     if state.get("active") != "codex":
@@ -110,6 +110,13 @@ def activate(settings, state, env):
     # Keep its native value in baseline, but remove the old profile's lock.
     settings.setdefault("env", {}).pop("CLAUDE_CODE_EFFORT_LEVEL", None)
     settings["env"].update(env)
+    if preferences:
+        state.setdefault("preferences", {}).update(preferences)
+    for key, value in state.get("preferences", {}).items():
+        baseline = state.setdefault("preference_baseline", {})
+        if key not in baseline:
+            baseline[key] = {"present": key in settings, "value": settings.get(key)}
+        settings[key] = value
     state["active"] = "codex"
     return settings, state
 
@@ -124,6 +131,11 @@ def deactivate(settings, state):
         env.update(state.get("baseline", {}))
         if not env and not state.get("env_existed"):
             settings.pop("env", None)
+        for key, original in state.pop("preference_baseline", {}).items():
+            if original["present"]:
+                settings[key] = original["value"]
+            else:
+                settings.pop(key, None)
         state["active"] = "claude"
     return settings, state
 
@@ -244,15 +256,34 @@ class Backend:
             time.sleep(0.3)
         raise ValueError("Local gateway is not healthy; see ~/Library/Logs/claude-backend")
 
-    def switch(self, profile):
+    def switch(self, profile, model=None, effort=None):
         settings = read_json(self.settings, {})
         state = read_json(self.state, {})
         if profile == "codex":
             self.start()
+            preferences = {}
+            if model:
+                preferences["model"] = model
+            if effort:
+                preferences["effortLevel"] = effort
+            selected = model or state.get("preferences", {}).get("model")
+            if selected:
+                # Keep existing aliases and in-flight sessions routed as before.
+                config_path = self.root / "config.yaml"
+                config = read_json(config_path)
+                payload = config.setdefault("requests", {}).setdefault("payload", {})
+                for section, templates in (("default", [client_effort_default()]),
+                                           ("override", [auxiliary_effort_override(), classifier_effort_override(), auto_mode_override()])):
+                    rules = payload.setdefault(section, [])
+                    for rule in templates:
+                        rule["models"][0]["name"] = selected
+                        if rule not in rules:
+                            rules.append(rule)
+                write_json(config_path, config)
             if state.get("active") != "codex":
                 stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
                 write_json(self.root / "backups" / f"settings-{stamp}.json", settings)
-            settings, newstate = activate(settings, state, codex_env(self.key()))
+            settings, newstate = activate(settings, state, codex_env(self.key()), preferences)
             # Save the baseline first, so an interrupted write is recoverable.
             write_json(self.state, newstate)
             write_json(self.settings, settings)
@@ -270,7 +301,11 @@ class Backend:
         actual = read_json(self.settings, {}).get("env", {}).get("ANTHROPIC_BASE_URL") == URL
         print("Profile:", "codex" if actual else "claude")
         if actual:
-            print(f"Backend: {MODEL}, client-selected effort; opus/sonnet/haiku are compatibility aliases.")
+            settings = read_json(self.settings, {})
+            selected = settings.get("model", "opus")
+            effort = settings.get("effortLevel", "client default")
+            print(f"New-session default: {selected}; effort: {effort}.")
+            print(f"Compatibility aliases opus/sonnet/haiku route to {MODEL}; explicit model names are preserved.")
             print("Local gateway:", "ready" if self.health() else "unavailable")
         elif state.get("active") == "codex":
             print("Settings changed externally; saved original environment is available for restoration.")
@@ -282,13 +317,17 @@ def main():
     parser.add_argument("command", choices=["install", "codex", "claude", "status", "start"])
     parser.add_argument("--archive", type=Path, help="Previously downloaded, checksum-verified during install")
     parser.add_argument("--proxy-binary", type=Path, help="Locally built, patched gateway executable")
+    parser.add_argument("--model", help="Default model for new Codex-profile sessions")
+    parser.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="Default effort, overridable per session")
     args = parser.parse_args()
+    if (args.model or args.effort) and args.command != "codex":
+        parser.error("--model and --effort apply only to the codex profile")
     backend = Backend()
     try:
         if args.command == "install":
             backend.install(args.archive, args.proxy_binary)
         elif args.command in ("codex", "claude"):
-            backend.switch(args.command)
+            backend.switch(args.command, args.model, args.effort)
         elif args.command == "start":
             backend.start()
         else:
