@@ -8,7 +8,7 @@ u="$1"
 h=$(getent passwd "$u" | cut -d: -f6)
 [[ -n "$h" && -d "$h/.claude" ]] || { echo "Unknown bot user: $u" >&2; exit 2; }
 marker="$h/.claude/model-backend"
-context_config=/usr/local/lib/claude-bot-cron/configure-channel-context.py
+context_config=${CLAUDE_BOT_CONTEXT_CONFIG_FILE:-/usr/local/lib/claude-bot-cron/configure-channel-context.py}
 if (($# == 1)); then
   if [[ -f "$marker" ]]; then cat "$marker"; else echo claude; fi
   exit 0

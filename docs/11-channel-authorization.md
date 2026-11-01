@@ -107,3 +107,37 @@ safety equivalence or cover every client/model version.
 retention of default/custom deny rules, and intentional empty replacement
 arrays. Native fixtures, account-specific IDs, full client policies and detailed
 reports stay in private `auto-mode-audit` directories on Mac/VPS.
+
+## Rollout verification
+
+Applied on 2026-11-01 to the 11 existing VPS bot profiles that select Codex.
+Every profile has exactly three managed entries; all settings outside
+`autoMode` equal the private pre-change backup. File owners are unchanged.
+The root CLI's debug log recorded the native settings merge immediately after
+the update; no client or gateway process was restarted. All bot heartbeats
+remained fresh (0.1–8.5 seconds in the verification sample).
+
+The infrastructure suite passes 27 tests, including the real profile-selector
+script's Codex → native Claude roundtrip in an isolated fixture. Additional
+classification-only checks passed for an explicitly requested daily cron job
+and a specifically named user-service restart under both original and updated
+VPS policies. These controls check that the change preserves operations which
+already worked; it does not make every denial a compatibility bug.
+
+The previously stopped finance subagent has finished; updating policy does not
+retroactively resume it or alter the spreadsheet. The new policy applies to
+subsequent permission checks. Do not claim completion of the finance report
+from this infrastructure verification.
+
+## OpenCodex comparison
+
+[OpenCodex](https://github.com/lidge-jun/opencodex) is another local protocol
+gateway, not a replacement implementation of the Claude CLI. Its
+[Claude guide](https://opencodex.me/guides/claude-code/) documents model
+capability metadata, model selection, account management, native fallback,
+reasoning-effort translation, and Messages ↔ Responses conversion. It also uses
+compatibility model aliases in some integrations while providing honest model
+display names. Its own development notes discuss classifier-thinking
+compatibility. This is a candidate for an isolated comparison, not evidence
+that changing gateways fixes the native channel/delegation consent issue.
+No OpenCodex installation or production migration was performed in this audit.
