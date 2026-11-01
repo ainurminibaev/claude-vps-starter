@@ -1,0 +1,75 @@
+{
+  "date": "2026-11-01",
+  "purpose": "Local compatibility comparison; not a production migration or general performance benchmark",
+  "candidate": {
+    "repository": "https://github.com/lidge-jun/opencodex",
+    "version": "2.96.0",
+    "commit": "684ad75",
+    "runtime": "Bun 1.3.11, macOS arm64",
+    "note": "Project package names Bun 1.4.4 as its test runner; this evaluation used the installed Bun runtime"
+  },
+  "baseline": "CLIProxyAPI 8.0.47+codex-compat.4",
+  "model": "gpt-6-astra",
+  "effort": "medium",
+  "isolation": {
+    "separate_loopback_listener": true,
+    "separate_opencodex_and_claude_config_directories": true,
+    "same_account": true,
+    "candidate_calls_upstream_directly": true,
+    "production_gateway_replaced": false,
+    "native_subscription_credentials_changed": false
+  },
+  "focused_project_tests": {
+    "passed": 113,
+    "failed": 0,
+    "files": [
+      "tests/claude-integration/claude-native-reasoning-continuity.test.ts",
+      "tests/claude-integration/claude-translated-server-tools.test.ts",
+      "tests/claude-integration/claude-client-refusal-status.test.ts",
+      "tests/routing/cl01-claude-outbound-review-regressions.test.ts",
+      "tests/cli/cli-effort.test.ts",
+      "tests/claude-integration/claude-intercept-proxy.test.ts"
+    ]
+  },
+  "live_messages_api": {
+    "requests_per_gateway": 5,
+    "errors": {"baseline": 0, "candidate": 0},
+    "text_prompt": "Return exactly: READY",
+    "text_response_correct_for_both": true,
+    "order": ["baseline", "candidate", "candidate", "baseline", "baseline", "candidate"],
+    "text_total_latency_ms": {
+      "baseline": [1895, 2665, 1677],
+      "candidate": [2397, 1636, 2126]
+    },
+    "text_median_ms": {"baseline": 1895, "candidate": 2126},
+    "tool_call": "read_status(service=demo)",
+    "tool_result": "Synthetic JSON state=healthy; no external service accessed",
+    "tool_roundtrip_correct_for_both": true,
+    "tool_call_latency_ms": {"baseline": 2368, "candidate": 2757},
+    "tool_result_response_latency_ms": {"baseline": 1657, "candidate": 3348}
+  },
+  "native_claude_cli": {
+    "safe_command": "printf OCX_TOOL_OK",
+    "tool_execution_passed_both_gateways": true,
+    "resume_recalled_previous_tool_output_both_gateways": true,
+    "final_instrumented_run_total_ms": {
+      "baseline": {"tool_turn": 6938, "resume_turn": 2441},
+      "candidate": {"tool_turn": 6740, "resume_turn": 2675}
+    },
+    "candidate_observed_upstream": {
+      "model": "gpt-6-astra",
+      "reasoning": {"summary": "auto", "effort": "medium"},
+      "stream": true,
+      "store": false
+    },
+    "warning": "Native CLI emitted unrecognized_model for explicit GPT model identifiers on both routes; tested turns still completed successfully"
+  },
+  "limits": [
+    "Three tiny text samples per gateway cannot establish general latency, reliability, quota savings or answer quality",
+    "Single native tool/resume scenario is not a complete Claude feature suite",
+    "No Telegram bot, cron, long-context, image-generation or account-refresh production migration was tested",
+    "No evidence from this evaluation that OpenCodex fixes the observed Auto Mode channel/delegation authorization problem",
+    "Existing working sessions and gateway remained in use"
+  ],
+  "decision": "Candidate passed the tested text, streaming, tool and resume scenarios. No demonstrated advantage justifies replacing the working gateway yet."
+}
