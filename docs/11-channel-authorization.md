@@ -1,5 +1,52 @@
 # Auto Mode authorization for authenticated channels and delegated tasks
 
+## Direct user consent after a delegated denial
+
+On 2026-11-02 the local Archi session repeatedly refused to retry a temporary
+remote container after the user explicitly confirmed the blocked operation.
+The child had received the coordinator's retelling of that confirmation, not
+the original human message. Native User Intent Rule 6 accepts a fresh human
+confirmation after a block; Rule 7 does not treat an agent's assertion as that
+human evidence. The parent's claim that a retry is forever prohibited was also
+too broad.
+
+A classification-only comparison used four synthetic histories, two models
+(Astra and Sol), and both CLIProxyAPI and OpenCodex. All 16 decisions agreed:
+no consent and a relay-only assertion were blocked; original user consent,
+with or without a subsequent relay, was allowed. This did not execute any
+represented command and did not compare with native Opus.
+
+The Mac Codex profile now installs the user-memory rule
+`~/.claude/rules/codex-consent-workflow.md` from
+`desktop-codex-backend/consent-workflow.md`. Consent-sensitive execution stays
+in the main conversation carrying the original user messages. Subagents can
+prepare the work. A delegated denial alone never authorizes takeover; a new
+explicit user confirmation permits one ordinary permission-checked retry of
+the same scoped action. A repeated denial stops the action rather than causing
+tool switching or permission changes. This is a workflow instruction, not an
+allow exception or a guarantee of model behavior.
+
+The profile controller removes only its marked rule when switching to native
+Claude and refuses to overwrite an unrelated user file at that path. Existing
+sessions must be restarted/resumed to reliably load the new user-memory rule.
+No gateway prompt rewriting, fabricated user messages, hook, permission bypass,
+or server-specific allowlist is installed by this change.
+
+Six model behavior checks (three histories on each of Astra and Sol) passed:
+the main agent requested the unchanged command through Bash after fresh human
+consent; a new user prohibition and a relay-only approval produced no tool call.
+Installation/removal and preservation of unrelated user rules are unit-tested.
+
+## Configuration scope correction
+
+Native `autoMode` configuration is read from user/managed settings and explicit
+invocation settings, not repository `.claude/settings*.json` files. Project
+environment descriptions in the user's global configuration therefore need
+explicit scope rather than declaring one project to be every session's repo.
+The Mac environment description was corrected accordingly; allow and deny
+rules were unchanged. This separate context correction does not itself repair
+consent propagation into subagents.
+
 The native Claude CLI and its Telegram plugin are unchanged. CLIProxyAPI still
 translates Anthropic Messages to Codex Responses. The primary model and the
 separate Auto Mode classifiers both use the configured Codex backend.

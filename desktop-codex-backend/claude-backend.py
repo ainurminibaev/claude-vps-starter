@@ -153,6 +153,22 @@ class Backend:
     def key(self):
         return (self.root / "client-key").read_text().strip()
 
+    def consent_workflow(self, profile):
+        path = self.home / ".claude/rules/codex-consent-workflow.md"
+        marker = "<!-- managed: claude-backend-consent-workflow -->"
+        if path.exists() and not path.read_text().startswith(marker):
+            raise ValueError("Consent workflow path contains unmanaged user instructions")
+        if profile == "claude":
+            path.unlink(missing_ok=True)
+            return
+        source = Path(__file__).with_name("consent-workflow.md")
+        if not source.exists():
+            source = self.binary.parent / "consent-workflow.md"
+        content = source.read_text()
+        if not content.startswith(marker):
+            raise ValueError("Invalid managed consent workflow template")
+        private_write(path, content)
+
     def health(self):
         try:
             req = urllib.request.Request(URL + "/v1/models", headers={"Authorization": "Bearer " + self.key()})
@@ -240,6 +256,9 @@ class Backend:
                  "EnvironmentVariables": {"HOME": str(self.home), "CPA_VISIBLE_CODEX_COMMENTARY": "1"}}
         private_write(self.plist, plistlib.dumps(plist))
         command = self.home / ".local/bin/claude-backend"
+        workflow = Path(__file__).with_name("consent-workflow.md")
+        if workflow.exists():
+            private_write(self.binary.parent / "consent-workflow.md", workflow.read_bytes())
         if Path(__file__).resolve() != command.resolve():
             private_write(command, Path(__file__).read_bytes())
             command.chmod(0o700)
@@ -261,6 +280,7 @@ class Backend:
         state = read_json(self.state, {})
         if profile == "codex":
             self.start()
+            self.consent_workflow(profile)
             preferences = {}
             if model:
                 preferences["model"] = model
@@ -288,6 +308,7 @@ class Backend:
             write_json(self.state, newstate)
             write_json(self.settings, settings)
         else:
+            self.consent_workflow(profile)
             settings, newstate = deactivate(settings, state)
             write_json(self.settings, settings)
             write_json(self.state, newstate)
