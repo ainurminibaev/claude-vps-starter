@@ -9,6 +9,13 @@ spec.loader.exec_module(backend)
 
 
 class Profiles(unittest.TestCase):
+    def test_context_window_is_declared_and_native_override_restored(self):
+        initial = {"env": {"CLAUDE_CODE_MAX_CONTEXT_TOKENS": "400000"}}
+        active, state = backend.activate(initial, {}, backend.codex_env("key"))
+        self.assertEqual(active["env"]["CLAUDE_CODE_MAX_CONTEXT_TOKENS"], "1050000")
+        self.assertEqual(active["env"]["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], "900000")
+        self.assertEqual(backend.deactivate(active, state)[0], initial)
+
     def test_consent_workflow_is_profile_scoped_and_preserves_other_rules(self):
         with tempfile.TemporaryDirectory() as directory:
             instance = backend.Backend(directory)

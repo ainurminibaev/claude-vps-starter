@@ -30,7 +30,7 @@ ALIASES = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
 MANAGED = ("ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY",
            "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL",
            "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_EFFORT_LEVEL",
-           "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_AUTO_MODE_SERVER",
+           "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_MAX_CONTEXT_TOKENS", "CLAUDE_CODE_AUTO_MODE_SERVER",
            "CLAUDE_CODE_GATEWAY_HINT_HEADERS")
 
 
@@ -96,7 +96,8 @@ def codex_env(key):
             # Codex uses the client's classifier, not Anthropic server safeguards.
             "CLAUDE_CODE_AUTO_MODE_SERVER": "0",
             "CLAUDE_CODE_GATEWAY_HINT_HEADERS": "1",
-            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "475000"}
+            "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "1050000",
+            "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "900000"}
 
 
 def activate(settings, state, env, preferences=None):
