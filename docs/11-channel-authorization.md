@@ -188,3 +188,21 @@ display names. Its own development notes discuss classifier-thinking
 compatibility. This is a candidate for an isolated comparison, not evidence
 that changing gateways fixes the native channel/delegation consent issue.
 No OpenCodex installation or production migration was performed in this audit.
+# Модель Auto Mode в локальном профиле Codex
+
+Сборка шлюза `8.0.47+codex-compat.5` поддерживает
+`requests.claude-auto-mode-follow-session: true`. Локальный переключатель
+включает эту настройку. При включённых нативных gateway hint headers шлюз
+запоминает модель основного запроса отдельно для каждого клиента и сессии.
+Распознанные запросы классификатора Auto Mode используют ту же модель:
+после основного запроса Astra проверяет Astra, после переключения на Sol
+и следующего основного запроса проверяет Sol. Субагент не меняет этот выбор.
+
+Это привязка **модели**, а не уровня размышлений: прежняя политика проверки
+Medium для первой стадии / High для второй сохраняется. Содержимое проверки,
+правила разрешений и решения классификатора не переписываются.
+После перезапуска шлюза до первого основного запроса, без hint headers или
+без известной сессии сохраняется исходная маршрутизация классификатора.
+Таблица хранится только в памяти, ограничена 4096 записями и сроком 24 часа.
+Настройка опциональная и по умолчанию выключена в публичном шлюзе.
+На VPS это изменение отдельно не включалось.
