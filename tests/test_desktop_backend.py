@@ -1,6 +1,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import tempfile
 
 spec = importlib.util.spec_from_file_location("desktop_backend", Path(__file__).resolve().parents[1] / "desktop-codex-backend/claude-backend.py")
 backend = importlib.util.module_from_spec(spec)
@@ -8,6 +9,32 @@ spec.loader.exec_module(backend)
 
 
 class Profiles(unittest.TestCase):
+    def test_consent_workflow_is_profile_scoped_and_preserves_other_rules(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instance = backend.Backend(directory)
+            rules = Path(directory) / ".claude/rules"
+            rules.mkdir(parents=True)
+            unrelated = rules / "user.md"
+            unrelated.write_text("Keep my instructions")
+            instance.consent_workflow("codex")
+            managed = rules / "codex-consent-workflow.md"
+            self.assertTrue(managed.read_text().startswith("<!-- managed:"))
+            instance.consent_workflow("codex")
+            instance.consent_workflow("claude")
+            self.assertFalse(managed.exists())
+            self.assertEqual(unrelated.read_text(), "Keep my instructions")
+
+    def test_consent_workflow_refuses_to_replace_user_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            instance = backend.Backend(directory)
+            path = Path(directory) / ".claude/rules/codex-consent-workflow.md"
+            path.parent.mkdir(parents=True)
+            path.write_text("My own rule")
+            for profile in ("codex", "claude"):
+                with self.assertRaises(ValueError):
+                    instance.consent_workflow(profile)
+            self.assertEqual(path.read_text(), "My own rule")
+
     def test_selected_defaults_restore_and_reapply_without_effort_lock(self):
         initial = {"model": "opus", "hooks": {"keep": True}}
         selected = {"model": "gpt-6-astra", "effortLevel": "medium"}
