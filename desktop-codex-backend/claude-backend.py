@@ -235,7 +235,8 @@ class Backend:
                   "upstream": {"codex": {"upstream-request-compression": True,
                                          "upstream-request-compression-min-bytes": 1024}},
                   "multimedia": {"disable-image-generation": "passthrough"},
-                  "requests": {"tls-handshake-timeout-seconds": 20, "nonstream-keepalive-interval": 10,
+                  "requests": {"claude-auto-mode-follow-session": True,
+                      "tls-handshake-timeout-seconds": 20, "nonstream-keepalive-interval": 10,
                       "streaming": {"keepalive-seconds": 15, "bootstrap-retries": 2},
                       "payload": {"default": [client_effort_default()],
                                   "override": [auxiliary_effort_override(), classifier_effort_override(), auto_mode_override()]}},
@@ -291,6 +292,7 @@ class Backend:
                 # Keep existing aliases and in-flight sessions routed as before.
                 config_path = self.root / "config.yaml"
                 config = read_json(config_path)
+                config.setdefault("requests", {})["claude-auto-mode-follow-session"] = True
                 payload = config.setdefault("requests", {}).setdefault("payload", {})
                 for section, templates in (("default", [client_effort_default()]),
                                            ("override", [auxiliary_effort_override(), classifier_effort_override(), auto_mode_override()])):
