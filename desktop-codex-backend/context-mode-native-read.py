@@ -27,9 +27,17 @@ def patch(root, backup=None):
             text = text.replace('- Primary tool for research. Runs all commands, auto-indexes, and searches.', '- For large data collection and processing after project instructions are loaded.')
             text = text.replace('- Use for all follow-up questions. ONE call, many queries.', '- Search indexed data; use native Read for project instructions and source files.')
             text = text.replace('- DO NOT use Read for analysis (use execute_file). Read IS correct for files you intend to Edit.', '- '+GUIDANCE)
-            start = text.index('export const READ_GUIDANCE = ')
-            end = text.index('\n', start)
-            text = text[:start] + 'export const READ_GUIDANCE = '+repr('<context_guidance>'+GUIDANCE+'</context_guidance>')+';' + text[end:]
+            if 'export function createReadGuidance(t)' in text:
+                start = text.index('export function createReadGuidance(t)')
+                end = text.index('\nexport function ', start+1)
+                text = text[:start]+'export function createReadGuidance(t) {\n  return '+repr('<context_guidance>'+GUIDANCE+'</context_guidance>')+';\n}\n'+text[end:]
+                text = text.replace('  <tool_selection_hierarchy>', '  <native_file_reading>\n    '+GUIDANCE+'\n  </native_file_reading>\n  <tool_selection_hierarchy>')
+                text = text.replace('- Primary research tool.', '- Large-data research tool after applicable project instructions are loaded.')
+                text = text.replace('- You want to analyze, summarize, or extract from a file → use ${t("ctx_execute_file")}. Read stays correct when you intend to Edit the file (Edit needs the exact bytes in your conversation to match against).', '- '+GUIDANCE)
+            else:
+                start = text.index('export const READ_GUIDANCE = ')
+                end = text.index('\n', start)
+                text = text[:start] + 'export const READ_GUIDANCE = '+repr('<context_guidance>'+GUIDANCE+'</context_guidance>')+';' + text[end:]
             text = '// native-file-reading-v1\n'+text
         elif path.name == 'SKILL.md':
             text = text.replace('Default to context-mode for ALL commands. Only use Bash for guaranteed-small-output operations.', GUIDANCE)
