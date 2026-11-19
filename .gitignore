@@ -13,3 +13,7 @@ codex-backend/client.env
 codex-backend/client-key
 codex-backend/*.tar.gz
 codex-backend/gateway-patches/bin/
+
+# Local backups of edited hooks and scripts
+*.bak-*
+*.bak
